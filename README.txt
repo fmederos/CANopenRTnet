@@ -1,6 +1,6 @@
 
-Aplicación de implementación CANopen sobre RTnet con código abierto
-*******************************************************************
+Implementación de nodo CANopen sobre RTnet en código abierto
+************************************************************
 
 Daniel García - Fernando Mederos
 Oct.-2013
