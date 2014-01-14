@@ -10,6 +10,12 @@
                                                   // ancho de pulso de la señal PWM
                                                   // grano=0 -> incremento=10nS, grano=1 -> incremento 20nS, 2->40nS, 3->60nS, etc.
                                                 // 4->80ns, 5->100ns
+
+// módulo Quadrature-Encoder-Input configura su cantidad de encoders leídos con este define que
+// en realidad debería llamarse "number_of_encoders"
+#define NUMBER_OF_MOTORS 2
+
+
 // máscaras para registro de Control CANopen
 #define MSK_CONTROL_ENCENDER    0b000000001
 #define MSK_CONTROL_DESHABV     0b000000010

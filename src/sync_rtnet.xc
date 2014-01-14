@@ -50,12 +50,15 @@
 #include "checksum.h"
 #include "xscope.h"
 #include "canopen.h"
-#include "sync_RTnet.h"
+#include "sync_rtnet.h"
 #include "mutual_thread_comm.h"
 #include "xccompat.h"
 #include "od.h"
 #include "pwm_singlebit_port.h"
-#include "sync_RTnet.h"
+#include "qei_server.h"
+#include "qei_client.h"
+#include "qei_commands.h"
+#include "sync_rtnet.h"
 
 
 
@@ -72,26 +75,54 @@ void xscope_user_init(void) {
 }
 #endif
 
-// Port Definitions
+// Definiciones de puertos en módulo GPIO:
 
-// Definiciones de puertos en módulo GPIO
-// GPIO Module Debe estar conectada al puerto cuadrado que va al núcleo 1 (tile 1)
-on tile[1]: out port p_led=XS1_PORT_4A;
+// Acceso a LED cuando GPIO está conectada al puerto cuadrado que va al núcleo 1 (tile 1)
+//on tile[1]: out port p_led=XS1_PORT_4A;
 
-// Header 20 hacia driver servo conectado a P2 de la GPIO (se podría usar GPIO-0 para PWM y GPO-2 para DIR)
-// Header 20 hacia encoders conectado a P4 de la GPIO (se podrían usar GPI-0/1 para encoder 1 y GPI-2/3 p.enc.2)
-// Pines 19 y 20 de estos headers suministran 3.3V y 5V resp.
 // GPIO Module conectado al triángulo:
+// -----------------------------------
+
+// TODO RTnet: conexiones XMOS <-> Pendulo:
+// Header 20 hacia driver servo y módulo wireless conectado a P2 de la placa GPIO (puertos GPIO y GPO)
+// (ver esquema eléctrico GPIO por pines de los headers)
+// GPIO-0       PWM a driver servomotor
+// GPIO-1
+// GPIO-2
+// GPIO-3
+// GPO-0/LED0
+// GPO-1/LED1
+// GPO-2        DIR a driver servomotor
+// GPO-3        SCK a modulo wireless
+// GPO-4        MOSI a módulo wireless
+// GPO-5        CSN a módulo wireless
+// GPO-6/LED2
+// GPO-7/LED3
+
+// Header 20 hacia encoder y módulo wireless conectado a P4 de la GPIO
+// GPI-0        Fase A encoder 0
+// GPI-1        Fase B encoder 0
+// GPI-2        MISO desde módulo wireless
+// GPI-3        IRQ desde módulo wireless
+// GPI-4
+// GPI-5
+// GPI-6/ButtonA
+// GPI-7/ButtonB
+
+// Pines 19 y 20 de ambos headers suministran 3.3V y 5V resp.
+
 // pines GPO-0..7 del GPIO module
 on tile[0]: out port p_out8=XS1_PORT_8C;        // LEDs corresponden a bits 0,1,6 y 7 de p_out8
 #define MSK_LED_1     0b00000001
 #define MSK_LED_2     0b00000010
-#define MSK_LED_3     0b00000100
-#define MSK_LED_4     0b00001000
+#define MSK_LED_3     0b01000000
+#define MSK_LED_4     0b10000000
+
 // 2 botones y 6 pines GPI-0..5 del GPIO module
 on tile[0]: in port p_in8=XS1_PORT_8D;          // los botones corresponden a bits 0 y 1 de p_in8
 #define MSK_BOTON_1     0b00000001
 #define MSK_BOTON_2     0b00000010
+
 // 4 salidas PWM GPIO_0..3 del módulo GPIO
 on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D, XS1_PORT_1E, XS1_PORT_1H };
 on tile[0] : clock clk = XS1_CLKBLK_1;
@@ -789,7 +820,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
   // Inicializamos comunicacion con la hebra CANopen
   mutual_comm_init_state(mstate);
 
-  // TODO RTnet: se comenta para probar
+  // TODO RTnet: es requerido inicializar el canal?
   //mutual_comm_notify(c_rx_tx, mstate);
   //mutual_comm_transaction(c_rx_tx, is_data_request, mstate);
   //mutual_comm_complete_transaction(c_rx_tx, is_data_request, mstate);
@@ -1274,7 +1305,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             slot_agenda[0].tipo = TRAMA_RTNET_CALREQ;
         }
         else{
-            // TODO RTNET: eesta espera por 10 ciclos podría ser aleatorizada para que todos los esclavos no
+            // TODO RTNET: esta espera por 10 ciclos podría ser aleatorizada para que todos los esclavos no
             // esperen siempre lo mismo...
             // durante proceso de calibración, vemos si NO llegó respuesta de calibración luego de 10 ciclos
             if(nCiclo > (slot_agenda[0].ciclo + 10)){
@@ -1361,11 +1392,33 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 
 
 // ***************************************************************************************************
-// Aplicación encargada de ejecutar comandos hacia actuadores y reportar estado de sensores
+// Aplicación encargada de ejecutar comandos desde maestro CANopen hacia actuadores y reportar
+// estado de sensores hacia maestro CANopen.
 //
+// Interfaz con actuadores y sensores:
+// -----------------------------------
 // Los actuadores en este caso es el motor de un servomotor.
-// Los sensores son dos encoders rotativos, uno en un servomotor (encoder 0) otro autónomo (encoder 1)
+// Los sensores son dos encoders rotativos, uno midiendo giro del servomotor (encoder 0) otro midiendo
+// el giro del brazo de un péndulo (encoder 1)
 //
+// El giro del servomotor (motor de corriente contínua) se controla mediante 2 señales de salida: una señal PWM
+// cuya modulación (ancho de pulso) controla el voltaje medio aplicado al motor y otra señal DIR (digital) para
+// controlar la polaridad del voltaje aplicado.
+//
+// El encoder 0 se lee directamente a través sus 2 señales de cuadratura.
+// El encoder 1 se lee a través de un módulo inalámbrico basado en el C.I. nRF24L01+ . Dentro del brazo del
+// péndulo existe un módulo inalámbrico detectando la señal en cuadratura del encoder 1 y enviando
+// la cuenta a otro módulo inalámbrico conectado al XMOS.
+
+// La comunicación de los módulos inalámbricos es SPI con 4 señales: CSN (chip-select, SCK (clock),
+// MOSI (dato hacia módulo), MISO (dato hacia micro). Si se requiere operación low-power se precisa
+// controlar la señal CE, de lo contrario se la deja permanentemente activa (alta). Para optimizar
+// los tiempos de respuesta en recpeción y/o tasa de transf. de
+// transmisión conviene leer la señal IRQ generada por el módulo.
+// Se requieren mínimo 3 señales de salida y 1 señal de entrada al mico para la comunicación con el módulo.
+//
+// Comunicación con maestro CANopen:
+// ---------------------------------
 // La principal interacción entre esta hebra y CANopen se da a través de escrituras/lecturas al
 // diccionario de objetos usando las funciones od_read_data, od_write_data y accesorias.
 // La hebra CANopen resuelve las solicitudes de escritura, mapeo, reporte automático, etc. entre el
@@ -1378,7 +1431,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 // Para monitorear y actualizar eficientemente los objetos del diccionario hay que inicializar
 // indices que permitan acceder al object_dictionary con od_read y od_write sin buscar el índice cada vez
 //
-// TODO RTnet:
+// TODO RTnet: a implementar en aplicación:
 // Objetos que requieren ser actualizados/supervisados por esta hebra:
 //      0x6040: Estado establecido desde maestro.
 //      0x6041: Estado reportado hacia el maestro
@@ -1396,7 +1449,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 //      boot-up message (COB ID 700h + node ID and 1 data byte with the content 00h).
 
 // ***************************************************************************************************
-void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_encoder)
+void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chanend c_encoder[NUMBER_OF_MOTORS])
 {
   timer t;
   unsigned time ;
@@ -1453,7 +1506,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
   int Salidas_pwm =                     od_find_data_address(od_find_index(0x6300),1);
   int Supported_drive_modes =           od_find_data_address(od_find_index(0x6502),0);
 
-  // inicializamos salidas pwm
+  // inicializamos salidas pwm a 0
   for(i=0;i<N_PUERTOS_PWM;i++){
       od_write_byte(Salidas_pwm + i , 0);
   }
@@ -1463,20 +1516,23 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
   Status = 0b1001010000;
   od_write_short(Statusword, Status);
 
+  // TODO: RTnet: esto es sólo para pruebas...
   // inicializamos timer para dentro de .5 segundos
   t :> time;
   time += 50000000;
 
   while(1){
+      // Actualizamos registro de estado para revisarlo...
+      Status = od_read_short(Statusword);
+
       // *********************
       // Revisamos modo de funcionamiento
       // *********************
-      // actualizamos registro de estado
-      Status = od_read_short(Statusword);
       if(od_read_byte(Modes_of_operation) != MODO_COPEN_VEL){
           // modo no es velocidad, activamos parada rápida
           Status |= MSK_STATUS_PARAR;
           od_write_short(Statusword,Status);
+          // TODO RTnet: cuando el eje se detenga tendríamos que hacer algo más?
       }
       // *********************
       // Revisamos controlword
@@ -1505,7 +1561,8 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
       }
       // reset por fallo
       if(Control & MSK_CONTROL_DESHABV){
-          // apagamos
+          // apagamos...
+          // activamos fallo, desactivamos habilitación, encendido y listo
           Status |= MSK_STATUS_FALLO;
           Status &= 0xffff - MSK_STATUS_OPERHAB;
           Status &= 0xffff - MSK_STATUS_ENCENDIDO;
@@ -1526,14 +1583,15 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
       // Si están los sistemas en funcionamiento activamos status listo
       // verificamos no estar en fallo
       if(!(Status & MSK_STATUS_FALLO)){
-          // TODO RTnet:
-          // deberíamos verificar bus rtnet activo, módulo CANopen estándar XMOS no permite ésto
+          // TODO RTnet: deberíamos verificar bus rtnet activo, módulo CANopen estándar XMOS no permite ésto
           // podríamos esperar a recibir alguna trama NMT, o LSS o SDO para pasar al estado listo...
           Status |= MSK_STATUS_LISTO;
           od_write_short(Statusword,Status);
       }
 
-
+      // ***********************************************
+      // Revisamos objetos de salidas digitales por cambios hechos desde el maestro
+      // ***********************************************
       // actualizamos salidas digitales (LEDs y pines) según objeto correspondiente
       // son 8 valores en el diccionario, cada uno lleva un solo bit.
       // obtengo un char con los 8 bits cargados juntos
@@ -1548,7 +1606,10 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
           p_out8_ant = c;
       }
 
-      // leemos estado entradas digitales
+      // ************************************
+      // Leemos estado entradas digitales y si hay cambio actualizamos diccionario
+      // ************************************
+/*    // Utilizando p_in8 para encoders no podemos utilizarlo como puerto de entradas general
       p_in8 :> c;
       // si hay cambio vamos a actualizar diccionario
       if(c != p_in8_ant){
@@ -1559,8 +1620,10 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
               c >>= 1;                                          // decalamos para el próximo bit
           }
       }
-
-      // revisamos objetos de salidas PWM
+*/
+      // *******************************************************
+      // Revisamos objetos de salidas PWM por si maestro hizo cambios
+      // *******************************************************
       cc=0;             // vamos a usar como marcador de cambio
       for(i=0;i<N_PUERTOS_PWM;i++){
           if((c=od_read_byte(Salidas_pwm + i)) != valores_pwm[i]){
@@ -1573,6 +1636,9 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
       // si hubo algún cambio actualizamos salidas del generador PWM
       if(cc) pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm, N_PUERTOS_PWM);
 
+      // **********************************************************************************************
+      // Atendemos canales de comunicación hacia hebra CANopen, contador encoder y eventos temporizados
+      // **********************************************************************************************
       select{
         // ************************
         // Comprobamos recepción de trama CANopen
@@ -1589,6 +1655,9 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, chanend c_enco
           }
 
           break ;
+
+        // TODO RTnet: actualmente sólo para ensayos:
+        // eventos temporizados
         case t when timerafter(time) :> time :
           //canopen_client_send_data_to_stack ( c_application , 2 , 1 , pdo_data );
           // app_tpdo_number
@@ -1661,7 +1730,9 @@ int main()
   chan c_rx_tx;
   // canal para comunicación CANopen <-> aplicación
   streaming chan c_application;
-  chan c_pwm, c_encoder ;
+  // canal para comunicación contadores cuadratura <-> aplicación
+  streaming chan c_qei[NUMBER_OF_MOTORS];
+  chan c_pwm;
 
   par{
     on tile [1]:{
@@ -1687,12 +1758,17 @@ int main()
     on tile [1]: canopen_server ( c_rx_tx , c_application );
 
     // se inicia la aplicación con comunicaciones a CANopen, sync_RTnet, módulo PWM y módulo contador de encoder
-    on tile [0]: aplicacion ( c_application , c_pwm , c_encoder);
+    on tile [0]: aplicacion ( c_application , c_pwm , c_qei);
+
+    // se inicia el servicio para múltiples encoders.
+    // Se lee cuenta y velocidad a través de array de chanends.
+    // Esta versión adaptada utiliza puerto de 8 bits para leer hasta 4 encoders en cuadratura
+    on tile[0]: do_multi4_qei ( c_qei, p_in8 );
 
     //on stdcore[0] : enableClockLeds(clockLed0);
     //on stdcore[1] : enableClockLeds(clockLed1);
 
-    on stdcore[0] : pwmSingleBitPort(c_pwm, clk, pwmPorts, N_PUERTOS_PWM, RES_PWM, GRANO_PWM , 1);
+    on tile[0] : pwmSingleBitPort(c_pwm, clk, pwmPorts, N_PUERTOS_PWM, RES_PWM, GRANO_PWM , 1);
 
   }
   return 0;
