@@ -1431,6 +1431,9 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 // Para monitorear y actualizar eficientemente los objetos del diccionario hay que inicializar
 // indices que permitan acceder al object_dictionary con od_read y od_write sin buscar el índice cada vez
 //
+// TODO RTnet: lectura encoder 0 mediante módulo QEI
+// TODO RTnet: comunicaciones SPI con módulo wireless para obtención de lectura encoder 1
+//
 // TODO RTnet: a implementar en aplicación:
 // Objetos que requieren ser actualizados/supervisados por esta hebra:
 //      0x6040: Estado establecido desde maestro.
@@ -1447,7 +1450,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 //
 // Mensaje de arranque? corresponde a aplicación?:
 //      boot-up message (COB ID 700h + node ID and 1 data byte with the content 00h).
-
+//
 // ***************************************************************************************************
 void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chanend c_encoder[NUMBER_OF_MOTORS])
 {
