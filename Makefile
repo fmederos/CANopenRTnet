@@ -25,7 +25,7 @@ XCC_FLAGS_full = -g -report -DCONFIG_FULL -fxscope -save-temps
 
 USED_MODULES = module_ethernet module_ethernet_board_support module_otp_board_info \
 	module_slicekit_support module_canopen module_can module_mutual_thread_comm \
-	module_pwm_singlebit_port module_dsc_qei
+	module_pwm_singlebit_port module_dsc_qei module_spi_master
 
 #=============================================================================
 #=============================================================================

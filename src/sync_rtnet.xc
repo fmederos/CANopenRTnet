@@ -88,8 +88,8 @@ void xscope_user_init(void) {
 // (ver esquema eléctrico GPIO por pines de los headers)
 // GPIO-0       PWM a driver servomotor
 // GPIO-1
-// GPIO-2
-// GPIO-3
+// GPIO-2       IRQ desde módulo wireless
+// GPIO-3       MISO desde módulo wireless
 // GPO-0/LED0
 // GPO-1/LED1
 // GPO-2        DIR a driver servomotor
@@ -99,11 +99,11 @@ void xscope_user_init(void) {
 // GPO-6/LED2
 // GPO-7/LED3
 
-// Header 20 hacia encoder y módulo wireless conectado a P4 de la GPIO
+// Header 20 hacia encoder 0 conectado a P4 de la GPIO
 // GPI-0        Fase A encoder 0
 // GPI-1        Fase B encoder 0
-// GPI-2        MISO desde módulo wireless
-// GPI-3        IRQ desde módulo wireless
+// GPI-2
+// GPI-3
 // GPI-4
 // GPI-5
 // GPI-6/ButtonA
@@ -112,20 +112,33 @@ void xscope_user_init(void) {
 // Pines 19 y 20 de ambos headers suministran 3.3V y 5V resp.
 
 // pines GPO-0..7 del GPIO module
-on tile[0]: out port p_out8=XS1_PORT_8C;        // LEDs corresponden a bits 0,1,6 y 7 de p_out8
+on tile[0]: out port p_out8=XS1_PORT_8C;
+// LEDs corresponden a bits 0,1,6 y 7 de p_out8
 #define MSK_LED_1     0b00000001
 #define MSK_LED_2     0b00000010
 #define MSK_LED_3     0b01000000
 #define MSK_LED_4     0b10000000
 
 // 2 botones y 6 pines GPI-0..5 del GPIO module
-on tile[0]: in port p_in8=XS1_PORT_8D;          // los botones corresponden a bits 0 y 1 de p_in8
+// sólo los 4 LSb son accesibles de forma individual a través de XS1_PORT_1M-P
+on tile[0]: in port p_in8=XS1_PORT_8D;
+// los botones corresponden a bits 0 y 1 de p_in8
 #define MSK_BOTON_1     0b00000001
 #define MSK_BOTON_2     0b00000010
 
 // 4 salidas PWM GPIO_0..3 del módulo GPIO
-on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D, XS1_PORT_1E, XS1_PORT_1H };
+//on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D, XS1_PORT_1E, XS1_PORT_1H };
+// eliminamos 2 salidas PWM para poder usar pines IO como entradas desde módulo wireless
+on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D };
 on tile[0] : clock clk = XS1_CLKBLK_1;
+
+// TODO RTnet:
+// conexiones al módulo wireless no pueden lograrse desde placa GPIO, hay que colocar un header directo
+// sobre placa XMOS y usar líneas de 1 bit que no están disponibles en las GPIOs
+// 2 puertos entrada desde módulo wireless
+on tile[0] : in port WL_MISO = XS1_PORT_1H;
+on tile[0] : in port WL_IRQ = XS1_PORT_1E;
+
 
 //on stdcore[0] : port clockLed0 = XS1_PORT_1A;
 //on stdcore[1] : port clockLed1 = XS1_PORT_1D;
@@ -881,6 +894,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             (master_mac_addr, unsigned short[])[1] = (rxbuf, unsigned short[])[4];
             (master_mac_addr, unsigned short[])[2] = (rxbuf, unsigned short[])[5];
 
+            /*
             // cada 1024 tramas sync notificamos
             if(0 == (nCiclo & 255)){
                 // cambiamos estado del LED1
@@ -890,6 +904,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
               //printstr("llegaron");
               //printstr(" otras 1024 tramas sync...\n");
             }
+            */
         }
         // Si recibimos trama respuesta de calibración tomamos dato de t_transmision y promediamos
         else if(is_TDMAtype((rxbuf,char[]), RTmac_TDMA_type_calreply)){
@@ -1371,14 +1386,22 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
                     slot_agenda[i].ciclo = nCiclo;
                     // esperamos al momento de transmitir la trama
                     temporizador when timerafter(timeout) :> void;
+
+                    /*
                     // cambiamos estado del LED0
                     puerto ^= 0b0001;
                     p_led <: puerto;
+                    */
+
                     // transmitir trama ya armada en txbuf
                     mac_tx_full(tx, slot_agenda[i].buf, slot_agenda[i].nbytes, slot_agenda[i].ifnum);
+
+                    /*
                     // cambiamos estado del LED0
                     puerto ^= 0b0001;
                     p_led <: puerto;
+                    */
+
                     // borramos entrada de la agenda
                     slot_agenda[i].nbytes=0;
                     printstr("Se envió trama\n");
@@ -1392,8 +1415,16 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 
 
 // ***************************************************************************************************
-// Aplicación encargada de ejecutar comandos desde maestro CANopen hacia actuadores y reportar
-// estado de sensores hacia maestro CANopen.
+// Código de aplicación para implementación de bus de campo CANopen sobre RTnet en un dispositivo
+// con perfil CiA-DSP-402 para manejadores de motores. Esta implementación agrega la lectura de un
+// codificador rotativo extra al perfil estándar con objeto de ensayar un péndulo invertido de Furuta.
+//
+// Este código recibe solicitudes de acceso al diccionario de objetos desde el maestro CANopen a través
+// del servidor canopen_server() por medio del canal c_application.
+// Aquí se resuelven además las actualizaciones necesarias entre D.O. y actuadores/sensores.
+// En ciertos casos la modificación desde el maestro CANopen de un
+// objeto conlleva la modificación del actuador asociado, al igual que el cambio de lectura de
+// un sensor debe actualizar el objeto asociado.
 //
 // Interfaz con actuadores y sensores:
 // -----------------------------------
@@ -1771,6 +1802,9 @@ int main()
     //on stdcore[0] : enableClockLeds(clockLed0);
     //on stdcore[1] : enableClockLeds(clockLed1);
 
+    // Se inicia hebra para generación PWM.
+    // Se envían actualizaciones a través del canal c_pwm y los pines de salida se pasan en el arreglo
+    // de puertos pwmPorts (1 bit cada puerto)
     on tile[0] : pwmSingleBitPort(c_pwm, clk, pwmPorts, N_PUERTOS_PWM, RES_PWM, GRANO_PWM , 1);
 
   }
