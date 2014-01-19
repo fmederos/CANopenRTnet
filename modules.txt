@@ -1,1 +1,5 @@
 	En subdirectorio modules se alojan módulos que fueron modificados para formar parte de el nodo CANopen.
+	Módulos de librería XMOS modificados:
+	module_canopen: od.c od.h object_dictionary_generator/
+	module_dsc_qei/
+	module_pwm_singlebit_port/
