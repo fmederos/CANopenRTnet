@@ -76,39 +76,31 @@ void xscope_user_init(void) {
 #endif
 
 // Definiciones de puertos:
+// ------------------------
 
-// Acceso a LED cuando GPIO está conectada al puerto cuadrado que va al núcleo 1 (tile 1)
-//on tile[1]: out port p_led=XS1_PORT_4A;
+// Header 24 pin conectado a J5 de placa XMOS:
+// TODO revisar implementación de este conexionado:
+// X0D0/GPIO-0          PWM a driver servomotor #6400sub1 replicado en #60FF
+// X0D11/GPIO-1         Salida PWM2 CANopen #6400sub2
+// X0D12/GPIO-2         Salida PWM3 CANopen #6400sub3
+// X0D23/GPIO-3         Salida PWM4 CANopen #6400sub4
+// X0D26/GPO-0/LED0     Salida dig.1 CANopen #6300sub1
+// X0D27/GPO-1/LED1     Salida dig.2 CANopen #6300sub2
+// X0D28/GPO-2          DIR (signo) a driver servomotor
+// X0D29/GPO-3          Salida DIR (signo) de PWM2
+// X0D30/GPO-4          Salida DIR (signo) de PWM3
+// X0D31/GPO-5          Salida DIR (signo) de PWM4
+// X0D32/GPO-6/LED2     Salida dig.3 CANopen #6300sub3
+// X0D33/GPO-7/LED3     Salida dig.4 CANopen #6300sub4
 
-// GPIO Module conectado al triángulo:
-// -----------------------------------
-
-// Header 20 hacia driver servo y módulo wireless conectado a P2 de la placa GPIO (puertos GPIO y GPO)
-// (ver esquema eléctrico GPIO por pines de los headers)
-// GPIO-0       PWM a driver servomotor
-// GPIO-1
-// GPIO-2
-// GPIO-3
-// GPO-0/LED0
-// GPO-1/LED1
-// GPO-2
-// GPO-3
-// GPO-4
-// GPO-5
-// GPO-6/LED2
-// GPO-7/LED3
-
-// Header 20 hacia encoder 0 conectado a P4 de la GPIO
-// Bit0:        ButtonA
-//              ButtonB
-//              GPI-0        Fase A encoder 0
-//              GPI-1        Fase B encoder 0
-//              GPI-2
-//              GPI-3
-//              GPI-4
-// Bit7:        GPI-5
-
-// Pines 19 y 20 de ambos headers P2 y P4 de la GPIO suministran 3.3V y 5V resp.
+// X0D36/ButtonA        Entrada dig.1 CANopen #6100sub1
+// X0D37/ButtonB        Entrada dig.2 CANopen #6100sub2
+// X0D38/GPI-0          Fase A encoder 0 CANopen #6063
+// X0D39/GPI-1          Fase B encoder 0 CANopen #6063
+// X0D40/GPI-2          *libre para otro encoder*
+// X0D41/GPI-3          *libre para otro encoder*
+// X0D42/GPI-4          Entrada dig.3 CANopen #6100sub3
+// X0D43/GPI-5          Entrada dig.4 CANopen #6100sub4
 
 // Header 20 pin en J4 de placa XMOS
 // X0D1/P1B     SCK módulo wireless
@@ -116,8 +108,11 @@ void xscope_user_init(void) {
 // X0D13/P1F    MISO módulo wireless
 // X0D22/P1G    CSN módulo wireless
 
+// GPIO Module conectado al triángulo para tomar voltajes 3.3V y 5.0V en P4
+// Pines 19 y 20 de ambos headers P4 de la GPIO suministran 3.3V y 5V resp.
 
-// pines GPO-0..7 del GPIO module
+
+// Puerto de salidas digitales CANopen y salidas DIR (signo) de PWM
 on tile[0]: out port p_out8=XS1_PORT_8C;
 // LEDs corresponden a bits 0,1,6 y 7 de p_out8
 #define MSK_LED_1     0b00000001
@@ -126,16 +121,16 @@ on tile[0]: out port p_out8=XS1_PORT_8C;
 #define MSK_LED_4     0b10000000
 
 // 2 botones y 6 pines GPI-0..5 del GPIO module
-// sólo los 4 LSb son accesibles de forma individual a través de XS1_PORT_1M-P
+//
 on tile[0]: in port p_in8=XS1_PORT_8D;
-// los botones corresponden a bits 0 y 1 de p_in8
+on tile[0]: in port p_in4=XS1_PORT_4C;
+on tile[0]: in port p_in_enc=XS1_PORT_4D;
+// los botones corresponden a bits 0 y 1 de p_in8 o de p_in4
 #define MSK_BOTON_1     0b00000001
 #define MSK_BOTON_2     0b00000010
 
-// 4 salidas PWM GPIO_0..3 del módulo GPIO
+// puerto de 4 salidas independientes para señales PWM
 on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D, XS1_PORT_1E, XS1_PORT_1H };
-// eliminamos 2 salidas PWM para poder usar pines IO para otras cosas
-//on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D };
 on tile[0] : clock clk = XS1_CLKBLK_1;
 
 // Conexiones al módulo wireless no pueden lograrse desde placa GPIO, hay que colocar un header directo
@@ -153,12 +148,6 @@ spi_master_interface spi_if =
     on tile[0]: XS1_PORT_1B,
     on tile[0]: XS1_PORT_1F
 };
-
-
-//on stdcore[0] : port clockLed0 = XS1_PORT_1A;
-//on stdcore[1] : port clockLed1 = XS1_PORT_1D;
-//on stdcore[2] : port clockLed2 = PORT_CLOCKLED_2;
-//on stdcore[3] : port clockLed3 = PORT_CLOCKLED_3;
 
 
 // Módulo ETH conectado a puerto circulo (nucleo 1)
@@ -1765,8 +1754,8 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       // ************************************
       // Leemos estado entradas digitales y si hay cambio actualizamos diccionario
       // ************************************
-/*    // Utilizando p_in8 para encoders no podemos utilizarlo como puerto de entradas general
-      p_in8 :> c;
+    // Utilizando p_in8 para encoders no podemos utilizarlo como puerto de entradas general
+      p_in4 :> c;
       // si hay cambio vamos a actualizar diccionario
       if(c != p_in8_ant){
           p_in8_ant = c;
@@ -1776,7 +1765,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
               c >>= 1;                                          // decalamos para el próximo bit
           }
       }
-*/
+
       // *******************************************************
       // Revisamos objetos de salidas PWM por si maestro hizo cambios
       // *******************************************************
@@ -1977,8 +1966,8 @@ int main()
 
     // se inicia el servicio para múltiples encoders.
     // Se lee cuenta y velocidad a través de array de chanends.
-    // Esta versión adaptada utiliza puerto de 8 bits para leer hasta 4 encoders en cuadratura
-    on tile[0]: do_multi4_qei ( c_qei, p_in8 );
+    // Esta versión adaptada utiliza puertos de 8 o 4 bits para leer hasta 4 o 2 encoders en cuadratura
+    on tile[0]: do_multi4_qei ( c_qei, p_in_enc );
 
     //on stdcore[0] : enableClockLeds(clockLed0);
     //on stdcore[1] : enableClockLeds(clockLed1);
