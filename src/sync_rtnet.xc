@@ -55,10 +55,10 @@
 #include "od.h"
 #include "pwm_singlebit_port.h"
 #include "qei_server.h"
-//#include "qei_client.h"
+#include "qei_client.h"
 //#include "qei_commands.h"
-#include "spi_master.h"
 #include "sync_rtnet.h"
+#include "spi_master.h"
 
 
 
@@ -99,14 +99,14 @@ void xscope_user_init(void) {
 // GPO-7/LED3
 
 // Header 20 hacia encoder 0 conectado a P4 de la GPIO
-// GPI-0        Fase A encoder 0
-// GPI-1        Fase B encoder 0
-// GPI-2
-// GPI-3
-// GPI-4
-// GPI-5
-// GPI-6/ButtonA
-// GPI-7/ButtonB
+// Bit0:        ButtonA
+//              ButtonB
+//              GPI-0        Fase A encoder 0
+//              GPI-1        Fase B encoder 0
+//              GPI-2
+//              GPI-3
+//              GPI-4
+// Bit7:        GPI-5
 
 // Pines 19 y 20 de ambos headers P2 y P4 de la GPIO suministran 3.3V y 5V resp.
 
@@ -138,7 +138,7 @@ on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D, XS1_P
 //on tile[0] : out buffered port:32 pwmPorts[] = { XS1_PORT_1A, XS1_PORT_1D };
 on tile[0] : clock clk = XS1_CLKBLK_1;
 
-// conexiones al módulo wireless no pueden lograrse desde placa GPIO, hay que colocar un header directo
+// Conexiones al módulo wireless no pueden lograrse desde placa GPIO, hay que colocar un header directo
 // sobre placa XMOS y usar líneas de 1 bit que no están disponibles en la GPIO conectada el puerto triángulo
 // Se puede acceder a los puertos simples correspondientes al puerto estrella: P1B, P1C, P1F, P1G (todos de tile 0)
 // 2 puertos entrada desde módulo wireless
@@ -1428,7 +1428,30 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
 }
 
 
-// funciones accesorias para acceso a puerto SPI
+// **************************************************************************************
+// Funciones accesorias para operación del módulo wireless nRF24L01
+//
+// Comandos al 24L01 empiezan con flanco desc. de línea CSN (llamada a función slave_select() )
+// Para leer registro STATUS se puede hacer una lectura de 8 bits sin previamente especificar
+// el registro a leer, siempre que se inicialice la opción SPI_MASTER_SD_CARD_COMPAT en 1
+// Como no usamos línea IRQ no se necesita configurar las máscaras de IRQ
+//
+// Se asume línea CE alta para habilitar modo RX contínuamente
+// En transmisor el CE también queda alto para modo TX continuo
+//
+// Lectura de registro de STATUS del chip nRF24L01+
+// ------------------------------------------------
+// Alcanza con una llamada a spi_master_in_byte() (devuelve unsigned char)
+// el significado de cada bit devuelto es:
+// bit7:        siempre 0 (no escribirlo)
+// bit6:        flag Data-Ready (activo alto), escribir 1 para borrarlo (se pone a 0)
+// bit5:        flag Data-Sent and acknowledged (activo alto), escribir 1 para borrarlo (se pone a 0)
+// bit4:        flag Retransmission-Limit-overrun (activo alto), escribir 1 para borrarlo (se pone a 0)
+// bits3,2,1:   Pipe-Number of data ready. valido 000..101, 111 es buffer vacío
+// bit0:        TX-Buffer full
+//
+// **************************************************************************************
+
 static inline void slave_select()
 {
     spi_ss <: 0;
@@ -1439,6 +1462,65 @@ static inline void slave_deselect()
     spi_ss <: 1;
 }
 
+
+// Herramienta para lectura de registros de 8 bits (1 sólo byte)
+unsigned char leer_reg_nrf(spi_master_interface &spi_if, unsigned char reg)
+{
+  unsigned char res;
+
+  // aseguramos nro registro con sólo 5 bits activos
+  // bit 5 a 0 hace una lectura
+  reg &= 0b00011111;
+
+  slave_select();
+  spi_master_out_byte(spi_if, reg);
+  // obtenemos 8 bits de respuesta
+  res = spi_master_in_byte(spi_if);
+  slave_deselect();
+
+  return res;
+}
+
+// Herramienta para escritura de registros de 8 bits (1 sólo byte)
+// El módulo nrf DEBE estar en POWER-DOWN o STAND-BY para aceptar escrituras a registros
+void escribir_reg_nrf(spi_master_interface &spi_if, unsigned char reg, unsigned char val)
+{
+  // aseguramos nro.reg 5 bits y bit 5 a 1 para que sea una escritura
+  reg &= 0b00011111;
+  reg |= 0b00100000;
+
+  slave_select();
+  spi_master_out_byte(spi_if, reg);
+  spi_master_out_byte(spi_if, val);
+  slave_deselect();
+}
+
+// Inicializar registro 00h del nrf: bit0 en 1 (modo PRX), bit1 en 1 (powerup)
+// CRC activo por defecto, IRQ no enmascarada, solo data-pipes 0 y 1 habilitados
+// direccion de 5 bytes, auto-retransmit de 250uS, 3 auto-retransmisiones
+// canal RF nro 2, data-rate de 2Mbps, potencia 0dBm,
+// Dirección de recepción pipe0 en 0xE7E7E7E7E7 por defecto
+// Dirección de recepción pipe1 en 0xC2C2C2C2C2 por defecto
+// Dirección de transmisión en 0xE7E7E7E7E7 por defecto
+void configurar_nrf(spi_master_interface &spi_if)
+{
+  unsigned char uc;
+
+  // primero asegurarse power-down:
+  // leemos STATUS
+  slave_select();
+  uc = spi_master_in_byte(spi_if);
+  slave_deselect();
+  uc &= 0b11111101;     // aseguramos bit1 a cero (power-down)
+  // primer escritura sólo aseguramos estado power-down
+  escribir_reg_nrf(spi_if, 0, uc); // STATUS es registro 0
+  // en la 2da escritura vamos a configurar el STATUS
+  uc |= 0b01110001;     // bit0 a 1 (primary-RX), bits6,5,4 a 1 (borramos señales IRQ)
+  escribir_reg_nrf(spi_if, 0, uc);
+  // en la 3er escritura hacemos power-up con bit1 a 1 (power-up)
+  uc |= 0b00000010;
+  escribir_reg_nrf(spi_if, 0, uc);
+}
 
 
 // ***************************************************************************************************
@@ -1520,10 +1602,14 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   unsigned char pdo_data [8];
   unsigned char c,cc;
   int i;
+  unsigned int ui;
   unsigned char data_buffer[8];
   unsigned static char s;
   unsigned int valores_pwm[N_PUERTOS_PWM], valores_pwm_ant[N_PUERTOS_PWM];
   unsigned static char p_out8_ant, p_in8_ant;
+  // velocidad, posición y validez del dato del encoder0
+  unsigned velocidad0, posicion0, ok;
+  unsigned posicion0_ant;
   // controlword y statusword conviene tenerlos en variables accesibles
   // si son modificados hay que actualizar el OD de lo contrario se pierde la modificación
   unsigned int Control, Status;
@@ -1568,6 +1654,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   int Entradas_digitales =              od_find_data_address(od_find_index(0x6100),1);
   int Salidas_digitales =               od_find_data_address(od_find_index(0x6200),1);
   int Salidas_pwm =                     od_find_data_address(od_find_index(0x6300),1);
+  int Position1_actual_value =          od_find_data_address(od_find_index(0x6400),0);
   int Supported_drive_modes =           od_find_data_address(od_find_index(0x6502),0);
 
   // inicializamos salidas pwm a 0
@@ -1583,6 +1670,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   // iniciamos maestro SPI
   spi_master_init(spi_if, DEFAULT_SPI_CLOCK_DIV);
   slave_deselect();
+  configurar_nrf(spi_if);
 
   // TODO: RTnet: esto es sólo para pruebas...
   // inicializamos timer para dentro de .5 segundos
@@ -1703,6 +1791,64 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       }
       // si hubo algún cambio actualizamos salidas del generador PWM
       if(cc) pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm, N_PUERTOS_PWM);
+
+
+      // ****************************************
+      // Revisamos cuenta encoder 0 por si cambió
+      // ****************************************
+      // TODO
+      {velocidad0, posicion0, ok} = get_qei_data(c_encoder[0]);
+      //if(ok){
+          if (posicion0 != posicion0_ant){
+              // actualizamos objeto del diccionario
+              od_write_int(Position_actual_value, posicion0);
+              od_write_int(Velocity_actual_value, velocidad0);
+              // registramos posicion para la próxima comparación
+              posicion0_ant = posicion0;
+          }
+      //}
+
+
+      // **********************************************************
+      // Revisamos modulo wireless por si recibió dato de encoder 1
+      // **********************************************************
+      // leemos STATUS del módulo wl (modo rápido)
+      slave_select();
+      c = spi_master_in_byte(spi_if);
+      slave_deselect();
+      // chequeamos flag RX_DR
+      if (c & 0b01000000){
+          // hay dato/s RX
+          // verificar que dato sea del pipe0
+          if(c & 0b00001110){
+              // no es del pipe0, descartamos el dato (un sólo byte)
+              slave_select();
+              spi_master_out_byte(spi_if, 0b01100001);      // comando R_RX_PAYLOAD
+              cc = spi_master_in_byte(spi_if);
+              slave_deselect();
+              // volvemos sin restablecer el flag RX_DR para que la próxima se vuelva a
+              // chequear si el dato siguiente es del pipe correspondiente y haya el nro
+              // necesario de bytes en la FIFO
+          }
+          else{
+              // lo recibido es del pipe0, verificamos que ya hayan 4 bytes
+              cc = leer_reg_nrf(spi_if, 0x11);  // leemos registro RX_PW_P0
+              if(cc >= 4){
+                  // leemos 32 bits y pasamos al contador
+                  slave_select();
+                  spi_master_out_byte(spi_if, 0b01100001);      // comando R_RX_PAYLOAD
+                  // obtenemos 32 bits
+                  ui = spi_master_in_word(spi_if);
+                  slave_deselect();
+                  // actualizamos objeto del diccionario
+                  od_write_int(Position1_actual_value, ui);
+              }
+              // mientras no se llega a los 4 bytes recibidos borramos flag para que avise con
+              // el próximo byte que llegue
+              escribir_reg_nrf(spi_if, 0x07, 0b01000000);
+          }
+      }
+
 
       // **********************************************************************************************
       // Atendemos canales de comunicación hacia hebra CANopen, contador encoder y eventos temporizados

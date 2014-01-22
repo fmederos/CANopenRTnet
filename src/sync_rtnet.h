@@ -13,8 +13,11 @@
 
 // módulo Quadrature-Encoder-Input configura su cantidad de encoders leídos con este define que
 // en realidad debería llamarse "number_of_encoders"
-#define NUMBER_OF_MOTORS 2
+#define NUMBER_OF_MOTORS 1
 
+// En este modo (SD-Card) se puede leer el registro de STATUS del módulo WL directamente
+// con una lectura del puerto SPI
+#define SPI_MASTER_SD_CARD_COMPAT 1
 
 // máscaras para registro de Control CANopen
 #define MSK_CONTROL_ENCENDER    0b000000001
