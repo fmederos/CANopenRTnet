@@ -10,7 +10,9 @@
 		<project>module_locks</project>
 		<project>module_mutual_thread_comm</project>
 		<project>module_otp_board_info</project>
+		<project>module_pwm_singlebit_port</project>
 		<project>module_slicekit_support</project>
+		<project>module_spi_master</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

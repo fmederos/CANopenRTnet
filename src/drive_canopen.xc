@@ -65,51 +65,53 @@ ethernet_reset_interface_t eth_rst = ETHERNET_DEFAULT_RESET_INTERFACE_INIT;
 
 // Header 24 pin conectado a J5 de placa XMOS:
 // TODO revisar implementación de este conexionado:
-// X0D0/GPIO-0          PWM a driver servomotor #6400sub1 replicado en #60FF
-// X0D11/GPIO-1         Salida PWM2 CANopen #6400sub2
-// X0D12/GPIO-2         Salida PWM3 CANopen #6400sub3
-// X0D23/GPIO-3         Salida PWM4 CANopen #6400sub4
-// X0D26/GPO-0/LED0     Salida dig.1 CANopen #6300sub1
-// X0D27/GPO-1/LED1     Salida dig.2 CANopen #6300sub2
-// X0D28/GPO-2          DIR (signo) a driver servomotor
-// X0D29/GPO-3          Salida DIR (signo) de PWM2
-// X0D30/GPO-4          Salida DIR (signo) de PWM3
-// X0D31/GPO-5          Salida DIR (signo) de PWM4
-// X0D32/GPO-6/LED2     Salida dig.3 CANopen #6300sub3
-// X0D33/GPO-7/LED3     Salida dig.4 CANopen #6300sub4
+// Pin1         X0D0/GPIO-0          PWM a driver servomotor #6400sub1 replicado en #60FF
+// Pin3         X0D11/GPIO-1         Salida PWM2 CANopen #6400sub2
+// Pin2         X0D12/GPIO-2         Salida PWM3 CANopen #6400sub3
+// Pin4         X0D23/GPIO-3         Salida PWM4 CANopen #6400sub4
+// Pin5         X0D26/GPO-0/LED0     Salida dig.1 CANopen #6300sub1
+// Pin7         X0D27/GPO-1/LED1     Salida dig.2 CANopen #6300sub2
+// Pin9         X0D28/GPO-2          DIR (signo) a driver servomotor
+// Pin13        X0D29/GPO-3          Salida DIR (signo) de PWM2
+// Pin12        X0D30/GPO-4          Salida DIR (signo) de PWM3
+// Pin14        X0D31/GPO-5          Salida DIR (signo) de PWM4
+// Pin6         X0D32/GPO-6/LED2     Salida dig.3 CANopen #6300sub3
+// Pin8         X0D33/GPO-7/LED3     Salida dig.4 CANopen #6300sub4
 
-// X0D36/ButtonA        Entrada dig.1 CANopen #6100sub1
-// X0D37/ButtonB        Entrada dig.2 CANopen #6100sub2
-// X0D38/GPI-0          Fase A encoder 0 CANopen #6063
-// X0D39/GPI-1          Fase B encoder 0 CANopen #6063
-// X0D40/GPI-2          *libre para otro encoder*
-// X0D41/GPI-3          *libre para otro encoder*
-// X0D42/GPI-4          Entrada dig.3 CANopen #6100sub3
-// X0D43/GPI-5          Entrada dig.4 CANopen #6100sub4
+// Pin15        X0D36/ButtonA        Entrada dig.1 CANopen #6100sub1
+// Pin17        X0D37/ButtonB
+// Pin21        X0D38/GPI-0          Fase A encoder servomotor CANopen #6063
+// Pin23        X0D39/GPI-1          Fase B encoder servomotor CANopen #6063
+// Pin22        X0D40/GPI-2
+// Pin24        X0D41/GPI-3
+// Pin16        X0D42/GPI-4
+// Pin18        X0D43/GPI-5
 
 // Header 20 pin en J4 de placa XMOS
-// X0D1/P1B     SCK módulo wireless
-// X0D10/P1C    MOSI módulo wireless
-// X0D13/P1F    MISO módulo wireless
-// X0D22/P1G    CSN módulo wireless
+// Pin6         X0D1/P1B     SCK módulo wireless
+// Pin7         X0D10/P1C    MOSI módulo wireless
+// Pin16        X0D13/P1F    MISO módulo wireless
+// Pin15        X0D22/P1G    CSN módulo wireless
 
-// GPIO Module conectado al triángulo para tomar voltajes 3.3V y 5.0V en P4
-// Pines 19 y 20 de ambos headers P4 de la GPIO suministran 3.3V y 5V resp.
+// GPIO board conectada a zócalo triángulo para tomar voltajes 3.3V y 5.0V en P4
+// Pines 19 y 20 de P4 de la GPIO suministran 3.3V y 5V resp.
+// Pines 5,6,11,12,17,18 de P4 de la placa GPIO suministran GND
 
 
 // Puerto de salidas digitales CANopen y salidas DIR (signo) de PWM
-on tile[0]: out port p_out8=XS1_PORT_8C;
-// LEDs corresponden a bits 0,1,6 y 7 de p_out8
-#define MSK_LED_1     0b00000001
-#define MSK_LED_2     0b00000010
-#define MSK_LED_3     0b01000000
-#define MSK_LED_4     0b10000000
+//on tile[0]: out port p_out8=XS1_PORT_8C;
+on tile[0]: out port p_out4=XS1_PORT_4E;
+on tile[0]: out port p_out_dir=XS1_PORT_4F;
+// LEDs corresponden a bits 0,1,2 y 3 de p_out4
+#define MSK_LED_1     0b0001
+#define MSK_LED_2     0b0010
+#define MSK_LED_3     0b0100
+#define MSK_LED_4     0b1000
 
-// 2 botones y 6 pines GPI-0..5 del GPIO module
-//
-on tile[0]: in port p_in8=XS1_PORT_8D;
-on tile[0]: in port p_in4=XS1_PORT_4C;
-on tile[0]: in port p_in_enc=XS1_PORT_4D;
+// Puertos de entradas encoder y accesorias
+// 2 botones vienen de placa GPIO
+on tile[0]: in port p_in=XS1_PORT_1M;
+on tile[0]: in port p_in_enc=XS1_PORT_8D;
 // los botones corresponden a bits 0 y 1 de p_in8 o de p_in4
 #define MSK_BOTON_1     0b00000001
 #define MSK_BOTON_2     0b00000010
@@ -121,8 +123,6 @@ on tile[0] : clock clk = XS1_CLKBLK_1;
 // Conexiones al módulo wireless no pueden lograrse desde placa GPIO, hay que colocar un header directo
 // sobre placa XMOS y usar líneas de 1 bit que no están disponibles en la GPIO conectada el puerto triángulo
 // Se puede acceder a los puertos simples correspondientes al puerto estrella: P1B, P1C, P1F, P1G (todos de tile 0)
-// 2 puertos entrada desde módulo wireless
-
 on tile[0] : out port spi_ss = XS1_PORT_1G;
 // estructura interfaz del módulo SPI para comunicación con módulo wireless
 spi_master_interface spi_if =
@@ -133,6 +133,29 @@ spi_master_interface spi_if =
     on tile[0]: XS1_PORT_1B,
     on tile[0]: XS1_PORT_1F
 };
+
+
+// Conexiones al pendulo Furuta:
+// -----------------------------
+
+// Conector 8pin a driver PWM servo y encoder servo
+// Pin1         PWM (1 de J5)
+// Pin2         DIR (9 de J5)
+// Pin3         Enc-A (21 de J5)
+// Pin4         GND (5,6,11 de P4)
+// Pin5         Sal.Dig. (5 de J5)
+// Pin6         Ent.Dig. (15 de J5)
+// Pin7         Enc-B (23 de J5)
+// Pin8         5V (20 de P4)
+
+// Conector 6pin a módulo wireless para obtención de cuenta encoder brazo
+// Pin1         MISO (16 de J4)
+// Pin2         SCK (6 de J4)
+// Pin3         GND (12,17,18 de P4)
+// Pin4         CSN (15 de J4)
+// Pin5         MOSI (7 de J4)
+// Pin6         3.3V (19 de P4)
+
 
 
 // **************************************************************************************
@@ -203,15 +226,15 @@ void escribir_reg_nrf(spi_master_interface &spi_if, unsigned char reg, unsigned 
 }
 
 // Inicializar registro 00h del nrf: bit0 en 1 (modo PRX), bit1 en 1 (powerup)
-// CRC activo por defecto, IRQ no enmascarada, solo data-pipes 0 y 1 habilitados
-// direccion de 5 bytes, auto-retransmit de 250uS, 3 auto-retransmisiones
-// canal RF nro 2, data-rate de 2Mbps, potencia 0dBm,
-// Dirección de recepción pipe0 en 0xE7E7E7E7E7 por defecto
-// Dirección de recepción pipe1 en 0xC2C2C2C2C2 por defecto
-// Dirección de transmisión en 0xE7E7E7E7E7 por defecto
+// CRC activo con 1 byte, IRQ no enmascarada, solo data-pipe 0 habilitado
+// direccion de 3 bytes, sin auto-retransmit
+// canal RF según prestablecido, data-rate de 1Mbps, potencia 0dBm,
+// Dirección de recepción pipe0 predefinida
+// Dirección de transmisión igual rx
 void configurar_nrf(spi_master_interface &spi_if)
 {
   unsigned char uc;
+  unsigned char direccion[3]={ NRF_ADDRESS };
 
   // primero asegurarse power-down:
   // leemos STATUS
@@ -226,7 +249,51 @@ void configurar_nrf(spi_master_interface &spi_if)
   escribir_reg_nrf(spi_if, 0, uc);
   // en la 3er escritura hacemos power-up con bit1 a 1 (power-up)
   uc |= 0b00000010;
-  escribir_reg_nrf(spi_if, 0, uc);
+  escribir_reg_nrf(spi_if, 0, uc);              // recién se termina de configurar primary RX, power-up
+
+  // deshabilitamos auto-ack de todos los pipes
+  escribir_reg_nrf(spi_if, 0x01, 0b00000000);
+  // habilitamos sólamente el pipe 0
+  escribir_reg_nrf(spi_if, 0x02, 0b00000001);
+  // configuramos direcciones de 3 bytes
+  escribir_reg_nrf(spi_if, 0x03, 0x01);
+  // deshabilitamos las retransmisiones
+  escribir_reg_nrf(spi_if, 0x04, 0x00);
+  // seleccionamos canal
+  escribir_reg_nrf(spi_if, 0x05, NRF_CHANNEL);
+  // seleccionamos velocidad de 1Mbps y potencia TX de 0dBm
+  escribir_reg_nrf(spi_if, 0x06, 0b00000110);
+  // seleccionamos tamaño del payload esperado por el receptor
+  escribir_reg_nrf(spi_if, 0x11, 4);
+
+  // configuramos dirección (3bytes) de RX (sólo pipe 0)
+  slave_select();
+  spi_master_out_byte(spi_if, 0x2A);    // enviamos escritura en registro 0x0A con bit 5 activo para
+                                        // escribir en un registro
+  spi_master_out_byte(spi_if, direccion[0]);
+  spi_master_out_byte(spi_if, direccion[1]);
+  spi_master_out_byte(spi_if, direccion[2]);
+  slave_deselect();
+
+  // configuramos dirección (3bytes) de TX
+  slave_select();
+  spi_master_out_byte(spi_if, 0x30);    // enviamos escritura en registro 0x10 con bit 5 activo para
+                                        // escribir en un registro
+  spi_master_out_byte(spi_if, direccion[0]);
+  spi_master_out_byte(spi_if, direccion[1]);
+  spi_master_out_byte(spi_if, direccion[2]);
+  slave_deselect();
+
+  // REstablecemos flags y borramos FIFOs del nRF (flush)
+  escribir_reg_nrf(spi_if, 0x00, 0x70);         // borramos flags
+  // enviamos comando flush-rx
+  slave_select();
+  spi_master_out_byte(spi_if, 0b11100010);
+  slave_deselect();
+  // enviamos comando flush-tx
+  slave_select();
+  spi_master_out_byte(spi_if, 0b11100001);
+  slave_deselect();
 }
 
 
@@ -313,10 +380,10 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   unsigned char data_buffer[8];
   unsigned static char s;
   unsigned int valores_pwm[N_PUERTOS_PWM], valores_pwm_ant[N_PUERTOS_PWM];
-  unsigned static char p_out8_ant, p_in8_ant;
+  unsigned static char p_out4_ant, p_in_ant;
   // velocidad, posición y validez del dato del encoder0
-  unsigned velocidad0, posicion0, ok;
-  unsigned posicion0_ant;
+  unsigned velocidad, posicion, ok;
+  unsigned posicion_ant;
   // controlword y statusword conviene tenerlos en variables accesibles
   // si son modificados hay que actualizar el OD de lo contrario se pierde la modificación
   unsigned int Control, Status;
@@ -464,19 +531,19 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           c += (od_read_byte(Salidas_digitales+i) & 0x01);      // ponemos valor al bit 0
       }
       // sólo actualizamos salidas si cambió algún bit
-      if(c != p_out8_ant){
-          p_out8 <: c;
-          p_out8_ant = c;
+      if(c != p_out4_ant){
+          p_out4 <: c;
+          p_out4_ant = c;
       }
 
       // ************************************
       // Leemos estado entradas digitales y si hay cambio actualizamos diccionario
       // ************************************
     // Utilizando p_in8 para encoders no podemos utilizarlo como puerto de entradas general
-      p_in4 :> c;
+      p_in :> c;
       // si hay cambio vamos a actualizar diccionario
-      if(c != p_in8_ant){
-          p_in8_ant = c;
+      if(c != p_in_ant){
+          p_in_ant = c;
           // actualizamos objeto entradas_digitales según estado de pines de entrada
           for(i=0;i<8;i++){
               od_write_byte(Entradas_digitales + i, c & 0x01);  // un solo bit en cada indice
@@ -500,18 +567,18 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       if(cc) pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm, N_PUERTOS_PWM);
 
 
-      // ****************************************
-      // Revisamos cuenta encoder 0 por si cambió
-      // ****************************************
+      // ********************************************************
+      // Revisamos cuenta encoder 1 (encoder servo) por si cambió
+      // ********************************************************
       // TODO
-      {velocidad0, posicion0, ok} = get_qei_data(c_encoder[0]);
+      {velocidad, posicion, ok} = get_qei_data(c_encoder[1]);
       //if(ok){
-          if (posicion0 != posicion0_ant){
+          if (posicion != posicion_ant){
               // actualizamos objeto del diccionario
-              od_write_int(Position_actual_value, posicion0);
-              od_write_int(Velocity_actual_value, velocidad0);
+              od_write_int(Position_actual_value, posicion);
+              od_write_int(Velocity_actual_value, velocidad);
               // registramos posicion para la próxima comparación
-              posicion0_ant = posicion0;
+              posicion_ant = posicion;
           }
       //}
 
@@ -591,14 +658,14 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           //c_application <: 0x55;
 
           // boton apretado hace bit bajo
-          if(!(p_in8_ant & MSK_BOTON_1)){
+          if(!(p_in_ant & MSK_BOTON_1)){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
               c = od_read_byte(Salidas_pwm + 3);
               c += 1;
               c %= RES_PWM;
               od_write_byte(Salidas_pwm + 3 , c);
           }
-          else if(!(p_in8_ant & MSK_BOTON_2)){
+          else if(!(p_in_ant & MSK_BOTON_2)){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
               c = od_read_byte(Salidas_pwm + 3);
               c -= 1;
@@ -606,10 +673,10 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
               od_write_byte(Salidas_pwm + 3 , c);
           }
 
-          // alternamos bit 7 (4to LED) de salidas digitales
-          c = od_read_byte(Salidas_digitales + 7);
+          // alternamos bit 3 (4to LED) de salidas digitales accediendo al 4to subíndice (Sal_dig apunta al 1er sub.)
+          c = od_read_byte(Salidas_digitales + 3);
           c ^= 0x01;
-          od_write_byte(Salidas_digitales + 7, c);
+          od_write_byte(Salidas_digitales + 3, c);
 
           // próxima vez dentro de .5 segundos
           time += 50000000;

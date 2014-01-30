@@ -12,12 +12,15 @@
                                                 // 4->80ns, 5->100ns
 
 // módulo Quadrature-Encoder-Input configura su cantidad de encoders leídos con este define que
-// en realidad debería llamarse "number_of_encoders"
-#define NUMBER_OF_MOTORS 1
+// en rigor debería llamarse "number_of_encoders"
+#define NUMBER_OF_MOTORS 2
 
 // En este modo (SD-Card) se puede leer el registro de STATUS del módulo WL directamente
 // con una lectura del puerto SPI
 #define SPI_MASTER_SD_CARD_COMPAT 1
+// Selección de canal
+#define NRF_CHANNEL     5
+#define NRF_ADDRESS     0xB6,0x24,0xA6
 
 
 #ifdef __XC__
