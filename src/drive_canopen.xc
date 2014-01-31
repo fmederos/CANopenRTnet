@@ -100,7 +100,7 @@ ethernet_reset_interface_t eth_rst = ETHERNET_DEFAULT_RESET_INTERFACE_INIT;
 
 // Puerto de salidas digitales CANopen y salidas DIR (signo) de PWM
 //on tile[0]: out port p_out8=XS1_PORT_8C;
-on tile[0]: out port p_out4=XS1_PORT_4E;
+on tile[0]: out port p_out4=XS1_PORT_4E;        // (4 salidas digitales)
 on tile[0]: out port p_out_dir=XS1_PORT_4F;
 // LEDs corresponden a bits 0,1,2 y 3 de p_out4
 #define MSK_LED_1     0b0001
@@ -110,7 +110,8 @@ on tile[0]: out port p_out_dir=XS1_PORT_4F;
 
 // Puertos de entradas encoder y accesorias
 // 2 botones vienen de placa GPIO
-on tile[0]: in port p_in=XS1_PORT_1M;
+on tile[0]: in port p_in=XS1_PORT_1M;           // (1 sola entrada digital)
+on tile[0]: in port p_in_boton2=XS1_PORT_1N;    // (1 sola entrada digital)
 on tile[0]: in port p_in_enc=XS1_PORT_8D;
 // los botones corresponden a bits 0 y 1 de p_in8 o de p_in4
 #define MSK_BOTON_1     0b00000001
@@ -268,8 +269,7 @@ void configurar_nrf(spi_master_interface &spi_if)
 
   // configuramos dirección (3bytes) de RX (sólo pipe 0)
   slave_select();
-  spi_master_out_byte(spi_if, 0x2A);    // enviamos escritura en registro 0x0A con bit 5 activo para
-                                        // escribir en un registro
+  spi_master_out_byte(spi_if, 0x2A);    // enviamos comando escritura en registro 0x0A con bit 5 activo
   spi_master_out_byte(spi_if, direccion[0]);
   spi_master_out_byte(spi_if, direccion[1]);
   spi_master_out_byte(spi_if, direccion[2]);
@@ -277,8 +277,7 @@ void configurar_nrf(spi_master_interface &spi_if)
 
   // configuramos dirección (3bytes) de TX
   slave_select();
-  spi_master_out_byte(spi_if, 0x30);    // enviamos escritura en registro 0x10 con bit 5 activo para
-                                        // escribir en un registro
+  spi_master_out_byte(spi_if, 0x30);    // enviamos comando de escritura en registro 0x10 con bit 5 activo
   spi_master_out_byte(spi_if, direccion[0]);
   spi_master_out_byte(spi_if, direccion[1]);
   spi_master_out_byte(spi_if, direccion[2]);
@@ -374,12 +373,15 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   timer t;
   unsigned time ;
   unsigned char pdo_data [8];
-  unsigned char c,cc;
+  unsigned char c,cc,uc;
   int i;
   unsigned int ui;
   unsigned char data_buffer[8];
   unsigned static char s;
-  unsigned int valores_pwm[N_PUERTOS_PWM], valores_pwm_ant[N_PUERTOS_PWM];
+  unsigned int valores_pwm[N_PUERTOS_PWM];                      // valores_pwm va de 0..1024
+  unsigned char dirs_pwm;                                       // lleva bits de dirección de cada salida PWM
+  unsigned int valores_pwm_off[N_PUERTOS_PWM]={PWM_OFF};
+  unsigned int voltajes[N_PUERTOS_PWM];                         // voltajes va de -1024 a +1023
   unsigned static char p_out4_ant, p_in_ant;
   // velocidad, posición y validez del dato del encoder0
   unsigned velocidad, posicion, ok;
@@ -432,8 +434,9 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   int Supported_drive_modes =           od_find_data_address(od_find_index(0x6502),0);
 
   // inicializamos salidas pwm a 0
+  pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm_off, N_PUERTOS_PWM);
   for(i=0;i<N_PUERTOS_PWM;i++){
-      od_write_byte(Salidas_pwm + i , 0);
+      od_write_int(Salidas_pwm + (i<<2) , 0);
   }
 
   // inicializamos Status
@@ -443,7 +446,9 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
 
   // iniciamos maestro SPI
   spi_master_init(spi_if, DEFAULT_SPI_CLOCK_DIV);
+  // aseguramos desactiva línea de selección del módulo nRF antes de iniciarlo
   slave_deselect();
+  // configuramos e iniciamos módulo nRF
   configurar_nrf(spi_if);
 
   // TODO: RTnet: esto es sólo para pruebas...
@@ -545,26 +550,49 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       if(c != p_in_ant){
           p_in_ant = c;
           // actualizamos objeto entradas_digitales según estado de pines de entrada
-          for(i=0;i<8;i++){
+          for(i=0;i<N_ENT_DIGITALES;i++){
               od_write_byte(Entradas_digitales + i, c & 0x01);  // un solo bit en cada indice
               c >>= 1;                                          // decalamos para el próximo bit
           }
       }
 
       // *******************************************************
+      // Si estamos encendidos actualizamos valores PWM
       // Revisamos objetos de salidas PWM por si maestro hizo cambios
       // *******************************************************
-      cc=0;             // vamos a usar como marcador de cambio
-      for(i=0;i<N_PUERTOS_PWM;i++){
-          if((c=od_read_byte(Salidas_pwm + i)) != valores_pwm[i]){
-              // actualizamos salidas pwm
-              valores_pwm[i] = c;
-              // flag marcador de cambio
-              cc=1;
+//      if(Status & MSK_STATUS_ENCENDIDO){
+          cc=0;             // vamos a usar como marcador de cambio
+          uc=1;             // en uc llevamos máscara del bit correspondiente de las salidas DIR
+          for(c=0;c<N_PUERTOS_PWM;c++){
+              // leemos los objetos de salidas pwm (cada objeto ocupa 4 bytes)
+              if((i=od_read_int(Salidas_pwm + (c<<2))) != voltajes[c]){
+                  // actualizamos salidas pwm
+                  voltajes[c] = i;
+                  if(i < 0){
+                      dirs_pwm |= uc;
+                      valores_pwm[c] = -i;
+                  }
+                  else{
+                      dirs_pwm &= (0xFF ^ uc);
+                      valores_pwm[c] = i;
+                  }
+                  // flag marcador de cambio
+                  cc=1;
+              }
+              // la próxima vuelta precisamos máscara al siguiente bit
+              uc <<= 1;
           }
-      }
-      // si hubo algún cambio actualizamos salidas del generador PWM
-      if(cc) pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm, N_PUERTOS_PWM);
+          // si hubo algún cambio actualizamos
+          if(cc) {
+              // actualizamos salidas generador PWM
+              pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm, N_PUERTOS_PWM);
+              // actualizamos direcciones (signos) de salidas PWM
+              p_out_dir <: dirs_pwm;
+          }
+//      }
+//      else{
+//          pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm_off, N_PUERTOS_PWM);
+//      }
 
 
       // ********************************************************
@@ -660,17 +688,16 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           // boton apretado hace bit bajo
           if(!(p_in_ant & MSK_BOTON_1)){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
-              c = od_read_byte(Salidas_pwm + 3);
-              c += 1;
-              c %= RES_PWM;
-              od_write_byte(Salidas_pwm + 3 , c);
+              i = od_read_int(Salidas_pwm);
+              i += 10;
+              od_write_int(Salidas_pwm , i);
           }
-          else if(!(p_in_ant & MSK_BOTON_2)){
+          p_in_boton2 :> c;
+          if(!c){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
-              c = od_read_byte(Salidas_pwm + 3);
-              c -= 1;
-              c %= RES_PWM;
-              od_write_byte(Salidas_pwm + 3 , c);
+              i = od_read_int(Salidas_pwm);
+              i -= 10;
+              od_write_int(Salidas_pwm, i);
           }
 
           // alternamos bit 3 (4to LED) de salidas digitales accediendo al 4to subíndice (Sal_dig apunta al 1er sub.)
