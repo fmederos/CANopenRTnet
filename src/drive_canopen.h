@@ -22,7 +22,10 @@
 
 // En este modo (SD-Card) se puede leer el registro de STATUS del módulo WL directamente
 // con una lectura del puerto SPI
-#define SPI_MASTER_SD_CARD_COMPAT 1
+#define SPI_MASTER_SD_CARD_COMPAT 0
+#define DEFAULT_SPI_CLOCK_DIV 16
+#define SPI_MASTER_MODE 0
+
 // Selección de canal
 #define NRF_CHANNEL     5
 #define NRF_ADDRESS     0xB6,0x24,0xA6

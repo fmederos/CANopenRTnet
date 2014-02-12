@@ -237,6 +237,7 @@ void configurar_nrf(spi_master_interface &spi_if)
   unsigned char uc;
   unsigned char direccion[3]={ NRF_ADDRESS };
 
+  /*
   // primero asegurarse power-down:
   // leemos STATUS
   slave_select();
@@ -244,13 +245,16 @@ void configurar_nrf(spi_master_interface &spi_if)
   slave_deselect();
   uc &= 0b11111101;     // aseguramos bit1 a cero (power-down)
   // primer escritura sólo aseguramos estado power-down
-  escribir_reg_nrf(spi_if, 0, uc); // STATUS es registro 0
-  // en la 2da escritura vamos a configurar el STATUS
+  escribir_reg_nrf(spi_if, 0, uc); // CONFIG es registro 0
+  // en la 2da escritura vamos a configurar el CONFIG
   uc |= 0b01110001;     // bit0 a 1 (primary-RX), bits6,5,4 a 1 (borramos señales IRQ)
   escribir_reg_nrf(spi_if, 0, uc);
   // en la 3er escritura hacemos power-up con bit1 a 1 (power-up)
   uc |= 0b00000010;
   escribir_reg_nrf(spi_if, 0, uc);              // recién se termina de configurar primary RX, power-up
+*/
+  // Configuración básica del módulo:
+  escribir_reg_nrf(spi_if, 0, 0b00001001);      // CRC enabled, 1 byte CRC, Power-DOWN, Primary-RX
 
   // deshabilitamos auto-ack de todos los pipes
   escribir_reg_nrf(spi_if, 0x01, 0b00000000);
@@ -264,7 +268,9 @@ void configurar_nrf(spi_master_interface &spi_if)
   escribir_reg_nrf(spi_if, 0x05, NRF_CHANNEL);
   // seleccionamos velocidad de 1Mbps y potencia TX de 0dBm
   escribir_reg_nrf(spi_if, 0x06, 0b00000110);
-  // seleccionamos tamaño del payload esperado por el receptor
+  // seleccionamos tamaño del payload esperado por el receptor: 4 Bytes
+  // TODO 4 bytes debería esperar
+  //escribir_reg_nrf(spi_if, 0x11, 1);
   escribir_reg_nrf(spi_if, 0x11, 4);
 
   // configuramos dirección (3bytes) de RX (sólo pipe 0)
@@ -293,6 +299,9 @@ void configurar_nrf(spi_master_interface &spi_if)
   slave_select();
   spi_master_out_byte(spi_if, 0b11100001);
   slave_deselect();
+
+  // Power-UP del módulo
+  escribir_reg_nrf(spi_if, 0, 0b00001011);      // CRC enabled, 1 byte CRC, Power-UP, Primary-RX
 }
 
 
@@ -439,7 +448,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       od_write_int(Salidas_pwm + (i<<2) , 0);
   }
 
-  // inicializamos Status
+  // inicializamos Status del dispositivo CANopen
   // remote, deshabilitar encendido, voltaje habilitado (listo para encender permanece inactivo)
   Status = 0b1001010000;
   od_write_short(Statusword, Status);
@@ -451,6 +460,13 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   // configuramos e iniciamos módulo nRF
   configurar_nrf(spi_if);
 
+  // TODO: esto es para probar nomás...
+  c=leer_reg_nrf(spi_if, 0);
+  c=leer_reg_nrf(spi_if, 5);
+  c=leer_reg_nrf(spi_if, 6);
+
+
+
   // TODO: RTnet: esto es sólo para pruebas...
   // inicializamos timer para dentro de .5 segundos
   t :> time;
@@ -459,6 +475,26 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   while(1){
       // Actualizamos registro de estado para revisarlo...
       Status = od_read_short(Statusword);
+      // LED0 indica encendido, LED1 Listo, LED2 OperHab, LED3 sigue siendo un hartbeat
+      if(Status & MSK_STATUS_OPERHAB){
+          od_write_byte(Salidas_digitales + 2, 0);
+      }
+      else{
+          od_write_byte(Salidas_digitales + 2, 1);
+      }
+      if(Status & MSK_STATUS_LISTO){
+          od_write_byte(Salidas_digitales + 1, 0);
+      }
+      else{
+          od_write_byte(Salidas_digitales + 1, 1);
+      }
+      if(Status & MSK_STATUS_ENCENDIDO){
+          od_write_byte(Salidas_digitales + 0, 0);
+      }
+      else{
+          od_write_byte(Salidas_digitales + 0, 1);
+      }
+
 
       // *********************
       // Revisamos modo de funcionamiento
@@ -548,7 +584,16 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       p_in :> c;
       // si hay cambio vamos a actualizar diccionario
       if(c != p_in_ant){
-          p_in_ant = c;
+          // Función de seguridad de la entrada digital para abortar operación, la utilizamos
+          // como paro de emergencia
+          if(p_in_ant = c){
+              // paro de emergencia
+              Status |= MSK_STATUS_FALLO;
+              Status &= 0xffff - MSK_STATUS_OPERHAB;
+              Status &= 0xffff - MSK_STATUS_ENCENDIDO;
+              Status &= 0xffff - MSK_STATUS_LISTO;
+              od_write_short(Statusword,Status);
+          }
           // actualizamos objeto entradas_digitales según estado de pines de entrada
           for(i=0;i<N_ENT_DIGITALES;i++){
               od_write_byte(Entradas_digitales + i, c & 0x01);  // un solo bit en cada indice
@@ -614,15 +659,17 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       // **********************************************************
       // Revisamos modulo wireless por si recibió dato de encoder 1
       // **********************************************************
-      // leemos STATUS del módulo wl (modo rápido)
-      slave_select();
-      c = spi_master_in_byte(spi_if);
-      slave_deselect();
+      // leemos STATUS del módulo wl
+      // no se puede hacer simplemente spi_master_in_byte() por algún problema con la implementación del spi
+      c = leer_reg_nrf(spi_if, 7);
       // chequeamos flag RX_DR
       if (c & 0b01000000){
           // hay dato/s RX
           // verificar que dato sea del pipe0
           if(c & 0b00001110){
+              // borramos flag para que avise con
+              // el próximo byte que llegue
+              escribir_reg_nrf(spi_if, 0x07, 0b01000000);
               // no es del pipe0, descartamos el dato (un sólo byte)
               slave_select();
               spi_master_out_byte(spi_if, 0b01100001);      // comando R_RX_PAYLOAD
@@ -636,6 +683,9 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
               // lo recibido es del pipe0, verificamos que ya hayan 4 bytes
               cc = leer_reg_nrf(spi_if, 0x11);  // leemos registro RX_PW_P0
               if(cc >= 4){
+                  // borramos flag para que avise con
+                  // el próximo byte que llegue
+                  escribir_reg_nrf(spi_if, 0x07, 0b01000000);
                   // leemos 32 bits y pasamos al contador
                   slave_select();
                   spi_master_out_byte(spi_if, 0b01100001);      // comando R_RX_PAYLOAD
@@ -645,9 +695,11 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
                   // actualizamos objeto del diccionario
                   od_write_int(Position1_actual_value, ui);
               }
-              // mientras no se llega a los 4 bytes recibidos borramos flag para que avise con
-              // el próximo byte que llegue
-              escribir_reg_nrf(spi_if, 0x07, 0b01000000);
+              else{
+                  // borramos flag para que avise con
+                  // el próximo byte que llegue
+                  escribir_reg_nrf(spi_if, 0x07, 0b01000000);
+              }
           }
       }
 
@@ -658,6 +710,13 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       select{
         // ************************
         // Comprobamos recepción de trama CANopen
+        //
+        // Si CANopen recibe un RPDO asincrónico lo manda para acá a través del canal c_application
+        // Si CANopen recibe un RPDO sincrónico lo manda para acá en el momento apropiado según
+        // el tiempo configurado luego de que haya llegado el Sync.
+        //
+        // Si queremos desde aquí (aplicación) transmitir un TPDO tenemos que empezar poniendo
+        // el número de TPDO en el canal c_application , luego largo, luego datos
         // ************************
         case c_application :> char pdo_number :
           // recibimos la trama sin hacer nada con ella...
@@ -685,6 +744,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           //c_application <: 0xAA;
           //c_application <: 0x55;
 
+
           // boton apretado hace bit bajo
           if(!(p_in_ant & MSK_BOTON_1)){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
@@ -692,6 +752,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
               i += 10;
               od_write_int(Salidas_pwm , i);
           }
+
           p_in_boton2 :> c;
           if(!c){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
