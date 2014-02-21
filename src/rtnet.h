@@ -47,6 +47,10 @@
 #define RTNET_NSLOTS    4
 // tamaño del bufferes de recepcion/trasmisión de tramas CANopen (cant.tramas)
 #define RTNET_FRAME_BUFFER_SIZE 8
+// máximo tiempo de transporte tolerable para la calibración en decenas de nS
+#define MAX_T_TRANSPORTE 10000
+// tiempo de transporte estimado a utilizar antes de finalizar la calibración
+#define T_TRANSPORTE_DEF 2000
 
 #define __mac_custom_filter_h_exists__ 1
 

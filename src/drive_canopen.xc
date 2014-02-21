@@ -11,6 +11,7 @@
 #include <xs1.h>
 #include <xclib.h>
 #include <print.h>
+#include <stdio.h>
 #include <platform.h>
 #include <stdlib.h>
 #include "otp_board_info.h"

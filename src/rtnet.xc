@@ -18,6 +18,7 @@
 
 #include <xs1.h>
 #include <xclib.h>
+#include <stdio.h>
 #include <print.h>
 #include <platform.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@
 #define OWN_IP_ADDRESS {192, 168, 3, 2}
 // La MAC de la placa XMOS utilizada es: 00:22:97:00:56:C4
 //::
+// en common.h de módulo CANopen está el node-id
+//  #define CANOPEN_NODE_ID 0
 
 
 
@@ -178,28 +181,28 @@ int is_valid_arp_packet(const unsigned char rxbuf[], int nbytes)
   if (rxbuf[12] != 0x08 || rxbuf[13] != 0x06)
     return 0;
 
-  printstr("ARP packet received\n");
+  //printstr("ARP packet received\n");
 
   if ((rxbuf, const unsigned[])[3] != 0x01000608)
   {
-    printstr("Invalid et_htype\n");
+    //printstr("Invalid et_htype\n");
     return 0;
   }
   if ((rxbuf, const unsigned[])[4] != 0x04060008)
   {
-    printstr("Invalid ptype_hlen\n");
+    //printstr("Invalid ptype_hlen\n");
     return 0;
   }
   if (((rxbuf, const unsigned[])[5] & 0xFFFF) != 0x0100)
   {
-    printstr("Not a request\n");
+    //printstr("Not a request\n");
     return 0;
   }
   for (int i = 0; i < 4; i++)
   {
     if (rxbuf[38 + i] != own_ip_addr[i])
     {
-      printstr("Not for us\n");
+      //printstr("Not for us\n");
       return 0;
     }
   }
@@ -221,23 +224,23 @@ int is_valid_icmp_packet(const unsigned char rxbuf[], int nbytes)
   if (rxbuf[23] != 0x01)
     return 0;
 
-  printstr("ICMP packet received\n");
+  //printstr("ICMP packet received\n");
 
   if ((rxbuf, const unsigned[])[3] != 0x00450008)
   {
-    printstr("Invalid et_ver_hdrl_tos\n");
+    //printstr("Invalid et_ver_hdrl_tos\n");
     return 0;
   }
   if (((rxbuf, const unsigned[])[8] >> 16) != 0x0008)
   {
-    printstr("Invalid type_code\n");
+    //printstr("Invalid type_code\n");
     return 0;
   }
   for (int i = 0; i < 4; i++)
   {
     if (((c=rxbuf[30 + i]) != 0xFF) && (c != own_ip_addr[i]))
     {
-      printstr("Not for us\n");
+      //printstr("Not for us\n");
       return 0;
     }
   }
@@ -245,14 +248,14 @@ int is_valid_icmp_packet(const unsigned char rxbuf[], int nbytes)
   totallen = byterev((rxbuf, const unsigned[])[4]) >> 16;
   if (nbytes > 60 && nbytes != totallen + 14)
   {
-    printstr("Invalid size\n");
+    //printstr("Invalid size\n");
     printintln(nbytes);
     printintln(totallen+14);
     return 0;
   }
   if (checksum_ip(rxbuf) != 0)
   {
-    printstr("Bad checksum\n");
+    //printstr("Bad checksum\n");
     return 0;
   }
 
@@ -478,7 +481,7 @@ int armar_trama_cal_req(unsigned char rxbuf[], unsigned int txbuf[], const unsig
 // Para el DLC (data-length en bytes) de 0 hasta 8 como máximo para mantener compatibilidad con el formato can_frame
 // 3) Campo variable de hasta 8 bytes para datos (bytes 19 .. 26 de trama eth.)
 //
-// El formato en que se envía la trama ala hebra server CANopen es el definido por el tipo can_frame del módulo
+// El formato en que se envía la trama a la hebra server CANopen es el definido por el tipo can_frame del módulo
 // CAN estándard de XMOS en el archivo can.h
 // **************************************************************************
 void
@@ -488,13 +491,14 @@ elevar_trama_canopen(chanend server, unsigned char rxbuf[])
 
   // armamos una trama CAN a partir de lo que trae la trama Ethernet
   can_frame f;
-  // extraemos los 16LSb de COB-id de los bytes 14-15
-  f.id = byterev((rxbuf, const unsigned[])[3] & 0xffff0000);
-  f.id |= byterev((rxbuf, const unsigned[])[4] & 0x0000ff1f);
+  // extraemos los 16MSb de COB-id de los bytes 14-15
+  f.id = byterev((rxbuf, const unsigned[])[3] & 0xffff0000) <<16;
+  // extraemos 16LSb de bytes 16-17
+  f.id |= byterev((rxbuf, const unsigned[])[4] & 0x0000ff1f) >>16;
   // extraemos flag extended
-  f.extended = ((rxbuf, const unsigned[])[3] & 0x00000080) >> 7;
+  f.extended = ((rxbuf, const unsigned[])[3] & 0x00800000) >>23;
   // extraemos el bit RTR
-  f.remote = ((rxbuf, const unsigned[])[3] & 0x00000040) >> 6;
+  f.remote = ((rxbuf, const unsigned[])[3] & 0x00400000) >>22;
   // extraemos el data length
   f.dlc = rxbuf[18];
   // extraemos los 8 bytes de datos
@@ -645,7 +649,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
   rtnet_agenda_t slot_agenda[RTNET_NSLOTS];
   // tiempo de deteccion de última trama sync
   unsigned int t_sync;
-  unsigned int t_trans=2000;               // tiempo en decenas de nS de demora desde que el RTNet maestro
+  unsigned int t_trans=T_TRANSPORTE_DEF;               // tiempo en decenas de nS de demora desde que el RTNet maestro
                                           // intenta enviar una trama hasta que ella es detectada por este esclavo.
                                           // este tiempo incluye el tiempo de tránsito en el cable, el tiempo de
                                           // armado y desarmado de la trama en los chips PHY y las latencias en los
@@ -684,16 +688,16 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
   // p.ej. el slot 3 no puede tener un delay menor al del slot 2, etc.
   // además debe haber varios uS de tiempo libre entre tramas (20uS deberían sobrar)
   // *** mifase va de 0 hasta (nfases-1) ***
-  slot[0].delay = 200*100;
+  slot[0].delay = 150*100;
   slot[0].mifase = 0;
   slot[0].nfases = 1;
-  slot[1].delay = 400*100;
+  slot[1].delay = 200*100;
   slot[1].mifase = 0;
   slot[1].nfases = 1;
-  slot[2].delay = 600*100;
+  slot[2].delay = 250*100;
   slot[2].mifase = 1;
   slot[2].nfases = 3;
-  slot[3].delay = 700*100;
+  slot[3].delay = 300*100;
   slot[3].mifase = 2;
   slot[3].nfases = 3;
 
@@ -730,7 +734,8 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
   tx_buffer_tail = 0;
   message_filter_count=0;
 
-  printstr("Inicio sincronizacion...\n");
+  //printstr("Inicio servicio RTnet...\n");
+
   while (1)
   {
     unsigned int src_port;
@@ -740,6 +745,8 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
                                           // PHY->XMOS y luego del filtrado)
     unsigned int reqtxTime;             // contenedor para campo Calib-Request-TX-TimeStamp recibido desde el maestro
                                           // en cada trama cal-reply
+    unsigned long long reqtxTime_ult;         // último timestamp de solicitud de calibración. Es usado para verificar que
+                                          // la respuesta recibida del maestro corresponde con la última solicitud
 
     // ******************************
     // Esperamos llegada de una trama
@@ -818,21 +825,37 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // para no seguir con defasajes grandes también en las próximas 99 rondas...
             // acumulamos otra muestra del tiempo total (ida y vuelta)
             // los tiempos del maestro vienen en nS, los del esclavo en decenas de nS
-            t_trans_acum += ((rxTime - reqtxTime)-(reptxTime - reqrxTime)/10);
-
+            if ((i=((signed int)(rxTime - reqtxTime)-(signed long)(reptxTime - reqrxTime)/10)) > 0){
+                // Si el tiempo es coherente lo tomamos válido y lo acumulamos para promediar
+                if(reqtxTime == reqtxTime_ult){
+                    t_trans_acum += i;
+                    ++n_acum_t_trans;
+                }
+            }
             // vemos si completamos las muestras
-            if(++n_acum_t_trans == n_cal_t_trans){
+            if(n_acum_t_trans == n_cal_t_trans){
               // habíamos acumulado tiempo de ida y vuelta, queremos tener en t_trans sólo el de ida hacia el esclavo
               t_trans = (t_trans_acum / n_cal_t_trans) / 2;
-              // borramos el flag que usamos para indicar que estamos calibrando
+              // borramos el flag que usamos para indicar que estabamos calibrando
               slot_agenda[0].tipo = 0;
-              // e indicamos que completamos la calibración
-              RTnet_calibrado=1;
-              // ***
-              // Activamos CANopen
-              // ***
-              tx_enabled = 1;
-              Bus_Status = RTNET_STATE_PASSIVE;
+              // validamos el tiempo de transporte calculado
+              if (t_trans < MAX_T_TRANSPORTE){
+                  // e indicamos que completamos la calibración
+                  RTnet_calibrado=1;
+                  // ***
+                  // Activamos CANopen
+                  // ***
+                  tx_enabled = 1;
+                  // bus sale de RTNET_STATE_BUS_OFF
+                  Bus_Status = RTNET_STATE_PASSIVE;
+                  //printstr("RTnet: tiempo de tránsito calibrado.");
+              }
+              else{
+                  // vamos a repetir la calibración, ceramos contador y acumulador
+                  n_acum_t_trans = 0;
+                  t_trans_acum = 0;
+                  //printstr("RTnet: tiempo de tránsito excesivo, reiterando calibración.");
+              }
             }
             // vemos si corresponde solicitar otra ronda de calibración
             else if(n_acum_t_trans < n_cal_t_trans){
@@ -854,6 +877,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
         // Recibimos una trama CANopen encapsulada -> la pasamos al server CANopen
         // notificamos que queremos enviar al master (esta función es slave)
         mutual_comm_notify(c_rx_tx, mstate);
+        //printstr("RTnet: trama CANopen recibida, server CANopen notificado.");
         // para no perder la trama, tenemos que guardarla a la cabeza del buffer de recepción.
         // copiamos sólo los primeros RTNET_MAXBYTES
         j = nbytes/4;
@@ -894,7 +918,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             slot_agenda[i].tipo = TRAMA_ARP;
         }
         //mac_tx(tx, txbuf, nbytes, ETH_BROADCAST);
-        printstr("ARP response sent\n");
+        //printstr("RTnet: respuesta ARP agendada.");
     }
 
     // ***      Comprobación trama solicitud PING      ***
@@ -917,6 +941,80 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // marcamos que es ICMP
             slot_agenda[i].tipo = TRAMA_ICMP;
         }
+        //printstr("RTnet: respuesta PING agendada.");
+    }
+
+
+    // **********************************************
+    // Atendemos transmisiones agendadas para los slots
+    //
+    // Si existen transmisiones agendadas vamos a bloquear
+    // la hebra hasta que llegue el tiempo correspondiente
+    // al slot en el que debemos transmitir.
+    // Durante este periodo no vamos a atender tramas arribadas
+    // pero tampoco se supone que debieran llegar tramas que
+    // debamos atender.
+    // **********************************************
+    for(i=0 ; i < RTNET_NSLOTS ; i++){
+        // buscamos algun slot que tenga agendado transmitir bytes
+        if(slot_agenda[i].nbytes){
+            // verificamos que esta fase del slot nos corresponda...
+            if((nCiclo % slot[i].nfases) == slot[i].mifase){
+                // verificamos que el momento de transmitir no haya pasado!
+                // tenemos en cuenta el valor de tiempo de transporte calibrado
+                timeout = t_sync + slot[i].delay - 2*t_trans;
+                temporizador :> t;
+                // Tenemos agendado transmitir, vemos si aún tenemos tiempo para hacerlo, o ya pasó el momento
+                // TODO RTNET: esta comparación de tiempos hay que revisarla para prevenir rollover
+                if(t < timeout){
+                    // si la trama requiere rellenar campos lo hacemos
+                    if(slot_agenda[i].tipo == TRAMA_RTNET_CALREQ){
+                        // rellenamos campos txtimestamp y ncicloreply en la trama que vamos a transmitir
+                        // el tiempo de salida de la trama asumimos que será el programado...
+                        // son 64bits (unsigned long long):
+                        reqtxTime_ult = timeout;
+                        for(int j=0; j<8 ; j++){
+                            (slot_agenda[i].buf, unsigned char[])[22+j] = (reqtxTime_ult , unsigned char[])[7-j];
+                        }
+                        // TODO RTNET: tener en cuenta con slots compartidos el nciclo de respuesta no es nciclo+1 sino +nfases
+                        // pedimos respuesta en el próximo ciclo, llenamos campo response-cycle (32 bits)
+                        k = nCiclo + 1;
+                        for(int j=0; j<4 ; j++){
+                            (slot_agenda[i].buf, unsigned char[])[30+j] = (k, unsigned char[])[3-j];
+                        }
+                    }
+#ifdef _DEBUG_
+                    else{
+                        k=k;
+                    }
+#endif
+                    // ponemos el ciclo en el que estamos transmitiendo para que quede el registro que
+                    // permita detectar si no llega la respuesta en tiempo
+                    slot_agenda[i].ciclo = nCiclo;
+                    // esperamos al momento de transmitir la trama
+                    temporizador when timerafter(timeout) :> void;
+
+                    /*
+                    // cambiamos estado del LED0
+                    puerto ^= 0b0001;
+                    p_led <: puerto;
+                    */
+
+                    // transmitir trama ya armada en txbuf
+                    mac_tx_full(tx, slot_agenda[i].buf, slot_agenda[i].nbytes, slot_agenda[i].ifnum);
+
+                    /*
+                    // cambiamos estado del LED0
+                    puerto ^= 0b0001;
+                    p_led <: puerto;
+                    */
+
+                    // borramos entrada de la agenda
+                    slot_agenda[i].nbytes=0;
+                    //printstr("Se envió trama\n");
+                }
+            }
+        }
     }
 
 
@@ -933,7 +1031,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // si, servidor CANopen está en espera para recibir
             // ***
             // Contamos las tramas que tenemos para trasmitir
-            unsigned count = (rx_buffer_head - rx_buffer_tail);
+            unsigned count = (rx_buffer_head - rx_buffer_tail) % RTNET_FRAME_BUFFER_SIZE;
             unsigned buf_tail_index;
             // Si tenemos más tramas que el tamaño del buffer descartamos las más viejas
             if(count > RTNET_FRAME_BUFFER_SIZE)
@@ -951,6 +1049,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // si habían más de 1 tramas para enviar, notificamos devuelta para solicitar otra transacción
             if(count>1)
               mutual_comm_notify(c_rx_tx, mstate);
+            //printstr("RTnet: trama CANopen elevada al server.");
         }
         else {
           // ***
@@ -971,7 +1070,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
               e=bajar_trama_canopen(c_rx_tx, (txbuf_copen[tx_buffer_head], char[]));
               // en el último elemento del buffer pongo el tamaño de trama
               txbuf_copen[tx_buffer_head][RTNET_MAXBYTES/4] = e;
-
+              //printstr("RTnet: trama CANopen recibida del server y pasada a buffer TX.");
               tx_buffer_head++;
               tx_buffer_head = tx_buffer_head % RTNET_FRAME_BUFFER_SIZE;
               // si llenamos el buffer tendremos que borrar la trama más vieja
@@ -1077,19 +1176,22 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
               mutual_comm_transaction(c_rx_tx, is_data_request, mstate);
               mutual_comm_complete_transaction(c_rx_tx, is_data_request, mstate);
 
+              //printstr("RTnet: server CANopen comanda resetear.");
+
               // Restablecemos completamente el nodo
-              Bus_Status = RTNET_STATE_PASSIVE;
+              Bus_Status = RTNET_STATE_BUS_OFF;
               transmit_error_counter = 0;
               receive_error_counter = 0;
               rx_buffer_head = 0;
               rx_buffer_tail = 0;
               message_filter_count=0;
               tx_enabled = 0;
+              // Vamos a repetir la calibración, restablecemos contador y acumulador
               RTnet_calibrado = 0;
               n_cal_t_trans=100;
               n_acum_t_trans=0;
               t_trans_acum=0;
-              t_trans=2000;
+              t_trans=T_TRANSPORTE_DEF;
               // inicializamos agenda de transmisión
               for(i=0;i < RTNET_NSLOTS;i++){
                   slot_agenda[i].nbytes=0;
@@ -1173,6 +1275,8 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // avanzamos puntero del buffer
             tx_buffer_tail ++;
             tx_buffer_tail = tx_buffer_tail % RTNET_FRAME_BUFFER_SIZE;
+            //printstr("RTnet: trama agendada en slot ");
+            printcharln(j);
         }
     }
 
@@ -1198,6 +1302,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             slot_agenda[0].ifnum = src_port;
             // marcamos que es calreq para que lean llenos los campos nciclo-reply y req-txtimestamp
             slot_agenda[0].tipo = TRAMA_RTNET_CALREQ;
+            //printstr("RTnet: inicio de calibración de tiempo de tránsito");
         }
         else{
             // TODO RTNET: esta espera por 10 ciclos podría ser aleatorizada para que todos los esclavos no
@@ -1212,80 +1317,6 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
                 slot_agenda[0].ifnum = src_port;
                 // marcamos que es calreq para que lean llenos los campos nciclo-reply y req-txtimestamp
                 slot_agenda[0].tipo = TRAMA_RTNET_CALREQ;
-            }
-        }
-    }
-
-
-
-    // **********************************************
-    // Atendemos transmisiones agendadas para los slots
-    //
-    // Si existen transmisiones agendadas vamos a bloquear
-    // la hebra hasta que llegue el tiempo correspondiente
-    // al slot en el que debemos transmitir.
-    // Durante este periodo no vamos a atender tramas arribadas
-    // pero tampoco se supone que debieran llegar tramas que
-    // debamos atender.
-    // **********************************************
-    for(i=0 ; i < RTNET_NSLOTS ; i++){
-        // buscamos algun slot que tenga agendado transmitir bytes
-        if(slot_agenda[i].nbytes){
-            // verificamos que esta fase del slot nos corresponda...
-            if((nCiclo % slot[i].nfases) == slot[i].mifase){
-                // verificamos que el momento de transmitir no haya pasado!
-                // tenemos en cuenta el valor de tiempo de transporte calibrado
-                timeout = t_sync + slot[i].delay - 2*t_trans;
-                temporizador :> t;
-                // Tenemos agendado transmitir, vemos si aún tenemos tiempo para hacerlo, o ya pasó el momento
-                // TODO RTNET: esta comparación de tiempos hay que revisarla para prevenir rollover
-                if(t < timeout){
-                    // si la trama requiere rellenar campos lo hacemos
-                    if(slot_agenda[i].tipo == TRAMA_RTNET_CALREQ){
-                        // rellenamos campos txtimestamp y ncicloreply en la trama que vamos a transmitir
-                        // el tiempo de salida de la trama asumimos que será el programado...
-                        // son 64bits (unsigned long long):
-                        ull = timeout;
-                        for(int j=0; j<8 ; j++){
-                            (slot_agenda[i].buf, unsigned char[])[22+j] = (ull , unsigned char[])[7-j];
-                        }
-                        // TODO RTNET: tener en cuenta con slots compartidos el nciclo de respuesta no es nciclo+1 sino +nfases
-                        // pedimos respuesta en el próximo ciclo, llenamos campo response-cycle (32 bits)
-                        k = nCiclo + 1;
-                        for(int j=0; j<4 ; j++){
-                            (slot_agenda[i].buf, unsigned char[])[30+j] = (k, unsigned char[])[3-j];
-                        }
-                    }
-#ifdef _DEBUG_
-                    else{
-                        k=k;
-                    }
-#endif
-                    // ponemos el ciclo en el que estamos transmitiendo para que quede el registro que
-                    // permita detectar si no llega la respuesta en tiempo
-                    slot_agenda[i].ciclo = nCiclo;
-                    // esperamos al momento de transmitir la trama
-                    temporizador when timerafter(timeout) :> void;
-
-                    /*
-                    // cambiamos estado del LED0
-                    puerto ^= 0b0001;
-                    p_led <: puerto;
-                    */
-
-                    // transmitir trama ya armada en txbuf
-                    mac_tx_full(tx, slot_agenda[i].buf, slot_agenda[i].nbytes, slot_agenda[i].ifnum);
-
-                    /*
-                    // cambiamos estado del LED0
-                    puerto ^= 0b0001;
-                    p_led <: puerto;
-                    */
-
-                    // borramos entrada de la agenda
-                    slot_agenda[i].nbytes=0;
-                    printstr("Se envió trama\n");
-                }
             }
         }
     }

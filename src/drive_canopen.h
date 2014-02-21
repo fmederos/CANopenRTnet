@@ -2,7 +2,15 @@
 #define drive_canopen_H_
 #include <xs1.h>
 
+// *******************************************************************************
+// Configuraciones del nodo CANopen va en canopen_conf.h del módulo module_canopen
+// Node-Id, Harbeat, etc.
+// *******************************************************************************
+
+
 #define _DEBUG_
+
+// Configuraciones del hardware
 
 #define N_ENT_DIGITALES 1
 #define N_SAL_DIGITALES 4
@@ -19,6 +27,9 @@
 // módulo Quadrature-Encoder-Input configura su cantidad de encoders leídos con este define que
 // en rigor debería llamarse "number_of_encoders"
 #define NUMBER_OF_MOTORS 2
+
+
+// Configuracion puerto SPI para comunicación con módulo wireless
 
 // En este modo (SD-Card) se puede leer el registro de STATUS del módulo WL directamente
 // con una lectura del puerto SPI

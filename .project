@@ -4,6 +4,7 @@
 	<comment></comment>
 	<projects>
 		<project>module_canopen</project>
+		<project>module_dsc_qei</project>
 		<project>module_ethernet</project>
 		<project>module_ethernet_board_support</project>
 		<project>module_ethernet_smi</project>
