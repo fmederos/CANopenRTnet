@@ -449,12 +449,15 @@ int armar_trama_cal_req(unsigned char rxbuf[], unsigned int txbuf[], const unsig
   for(int i=0; i<8 ; i++){
       (txbuf, unsigned char[])[34+i] = (ull,unsigned char[])[7-i];
   }
+
+
   // rellenamos con ceros desde final de trama calreq hasta completar 60 bytes, el PHY agrega los 4 de checksum
-  for(int i=42; i<60 ; i++){
+  for(int i=42; i<RTNET_NBYTES_COPEN ; i++){
       (txbuf, unsigned char[])[i] = 0;
   }
 
-  return 60;
+
+  return RTNET_NBYTES_COPEN;
 }
 
 
@@ -649,7 +652,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
   rtnet_agenda_t slot_agenda[RTNET_NSLOTS];
   // tiempo de deteccion de última trama sync
   unsigned int t_sync;
-  unsigned int t_trans=T_TRANSPORTE_DEF;               // tiempo en decenas de nS de demora desde que el RTNet maestro
+  unsigned int t_trans_x2=T_TRANSPORTE_DEF;               // tiempo en decenas de nS de demora desde que el RTNet maestro
                                           // intenta enviar una trama hasta que ella es detectada por este esclavo.
                                           // este tiempo incluye el tiempo de tránsito en el cable, el tiempo de
                                           // armado y desarmado de la trama en los chips PHY y las latencias en los
@@ -804,7 +807,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             // asumimos dos cosas:      -el reloj del maestro y el del esclavo están en las mismas unidades
             //                          -el reloj del maestro y del esclavo están desfasados por una cantidad fija
             // de esta forma podemos calcular el tiempo de demora entre el envío y la llegada de un paquete:
-            // t_transmision = ((T4-T1)-(T3-T2))/2
+            // t_transporte = ((T4-T1)-(T3-T2))/2
 
             // reqtxTime es repetida en la reply-calib. por el maestro, son 8 bytes pero los 4 mas significativos
             // deberían ser cero ya que el esclavo así los envió...
@@ -834,12 +837,13 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             }
             // vemos si completamos las muestras
             if(n_acum_t_trans == n_cal_t_trans){
-              // habíamos acumulado tiempo de ida y vuelta, queremos tener en t_trans sólo el de ida hacia el esclavo
-              t_trans = (t_trans_acum / n_cal_t_trans) / 2;
+              // habíamos acumulado tiempo de ida y vuelta de las n iteraciones
+              // guardamos el promedio
+              t_trans_x2 = (t_trans_acum / n_cal_t_trans);
               // borramos el flag que usamos para indicar que estabamos calibrando
               slot_agenda[0].tipo = 0;
               // validamos el tiempo de transporte calculado
-              if (t_trans < MAX_T_TRANSPORTE){
+              if (t_trans_x2 < MAX_T_TRANSPORTE){
                   // e indicamos que completamos la calibración
                   RTnet_calibrado=1;
                   // ***
@@ -962,17 +966,18 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
             if((nCiclo % slot[i].nfases) == slot[i].mifase){
                 // verificamos que el momento de transmitir no haya pasado!
                 // tenemos en cuenta el valor de tiempo de transporte calibrado
-                timeout = t_sync + slot[i].delay - 2*t_trans;
+                timeout = t_sync + slot[i].delay - t_trans_x2;
                 temporizador :> t;
                 // Tenemos agendado transmitir, vemos si aún tenemos tiempo para hacerlo, o ya pasó el momento
                 // TODO RTNET: esta comparación de tiempos hay que revisarla para prevenir rollover
+                // reservamos el tiempo de 100 instrucciones
                 if(t < timeout){
-                    // si la trama requiere rellenar campos lo hacemos
+                    // si la trama es solicitud de calibración de tiempo de transporte requiere rellenar campos
                     if(slot_agenda[i].tipo == TRAMA_RTNET_CALREQ){
                         // rellenamos campos txtimestamp y ncicloreply en la trama que vamos a transmitir
                         // el tiempo de salida de la trama asumimos que será el programado...
                         // son 64bits (unsigned long long):
-                        reqtxTime_ult = timeout;
+                        reqtxTime_ult = timeout;        // guardamos el timestamp en una variable para tenerlo como referencia
                         for(int j=0; j<8 ; j++){
                             (slot_agenda[i].buf, unsigned char[])[22+j] = (reqtxTime_ult , unsigned char[])[7-j];
                         }
@@ -983,32 +988,13 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
                             (slot_agenda[i].buf, unsigned char[])[30+j] = (k, unsigned char[])[3-j];
                         }
                     }
-#ifdef _DEBUG_
-                    else{
-                        k=k;
-                    }
-#endif
                     // ponemos el ciclo en el que estamos transmitiendo para que quede el registro que
                     // permita detectar si no llega la respuesta en tiempo
                     slot_agenda[i].ciclo = nCiclo;
                     // esperamos al momento de transmitir la trama
                     temporizador when timerafter(timeout) :> void;
-
-                    /*
-                    // cambiamos estado del LED0
-                    puerto ^= 0b0001;
-                    p_led <: puerto;
-                    */
-
                     // transmitir trama ya armada en txbuf
                     mac_tx_full(tx, slot_agenda[i].buf, slot_agenda[i].nbytes, slot_agenda[i].ifnum);
-
-                    /*
-                    // cambiamos estado del LED0
-                    puerto ^= 0b0001;
-                    p_led <: puerto;
-                    */
-
                     // borramos entrada de la agenda
                     slot_agenda[i].nbytes=0;
                     //printstr("Se envió trama\n");
@@ -1191,7 +1177,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
               n_cal_t_trans=100;
               n_acum_t_trans=0;
               t_trans_acum=0;
-              t_trans=T_TRANSPORTE_DEF;
+              t_trans_x2=T_TRANSPORTE_DEF;
               // inicializamos agenda de transmisión
               for(i=0;i < RTNET_NSLOTS;i++){
                   slot_agenda[i].nbytes=0;
@@ -1289,7 +1275,7 @@ void rtnet_sync(chanend tx, chanend rx, chanend c_rx_tx)
     }
 
     // Inicio de proceso de calibración de tiempo de transporte de tramas
-    // Verificamos tener calibrado t_trans
+    // Verificamos tener calibrado t_trans_x2
     if(!RTnet_calibrado){
         // verificamos no estar en proceso de calibración
         // para eso nos fijamos en el último tipo de trama que sacamos por el slot 0

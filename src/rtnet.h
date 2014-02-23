@@ -41,16 +41,16 @@
 // Tamaño máximo de trama RTNet en bytes
 // DEBE ser multiplo de 4 para poder transferir de a 32bits
 #define RTNET_MAXBYTES  128
-// Tamaño de trama normal CANopenRTnet
+// Tamaño de trama CANopenRTnet debe ser >59
 #define RTNET_NBYTES_COPEN      60
 // cantidad máxima de slots a utilizar
 #define RTNET_NSLOTS    4
 // tamaño del bufferes de recepcion/trasmisión de tramas CANopen (cant.tramas)
 #define RTNET_FRAME_BUFFER_SIZE 8
 // máximo tiempo de transporte tolerable para la calibración en decenas de nS
-#define MAX_T_TRANSPORTE 10000
+#define MAX_T_TRANSPORTE 30000
 // tiempo de transporte estimado a utilizar antes de finalizar la calibración
-#define T_TRANSPORTE_DEF 2000
+#define T_TRANSPORTE_DEF 4000
 
 #define __mac_custom_filter_h_exists__ 1
 

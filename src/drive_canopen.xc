@@ -430,29 +430,30 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
 
   // direcciones de datos notables en el diccionario de objetos:
   // los valores por defecto de estos objetos vienen inicializados en el object_dictionary.h
-  int Controlword =                     od_find_data_address(od_find_index(0x6040),0);
-  int Statusword =                      od_find_data_address(od_find_index(0x6041),0);
-  int Modes_of_operation =              od_find_data_address(od_find_index(0x6060),0);
-  int Modes_of_operation_display =      od_find_data_address(od_find_index(0x6061),0);
-  int Position_actual_value =           od_find_data_address(od_find_index(0x6063),0);
-  int Velocity_actual_value =           od_find_data_address(od_find_index(0x606C),0);
-  int Target_velocity =                 od_find_data_address(od_find_index(0x60FF),0);
-  int Entradas_digitales =              od_find_data_address(od_find_index(0x6100),1);
-  int Salidas_digitales =               od_find_data_address(od_find_index(0x6200),1);
-  int Salidas_pwm =                     od_find_data_address(od_find_index(0x6300),1);
-  int Position1_actual_value =          od_find_data_address(od_find_index(0x6400),0);
-  int Supported_drive_modes =           od_find_data_address(od_find_index(0x6502),0);
+  int Controlword_ix =                  od_find_index(0x6040);
+  int Statusword_ix =                   od_find_index(0x6041);
+  int Modes_of_operation_ix =           od_find_index(0x6060);
+  int Modes_of_operation_display_ix =   od_find_index(0x6061);
+  int Position_ix =                     od_find_index(0x6063);
+  int Velocity_ix =                     od_find_index(0x606C);
+  int Target_velocity_ix =              od_find_index(0x60FF);
+  int Entradas_digitales_ix =           od_find_index(0x6100);          // (subind. 1)
+  int Salidas_digitales_ix =            od_find_index(0x6200);          // (subind. 1)
+  int Salidas_pwm_ix =                  od_find_index(0x6300);          // (subind. 1)
+  int Position1_ix =                    od_find_index(0x6400);
+  int Supported_drive_modes_ix =        od_find_index(0x6502);
 
   // inicializamos salidas pwm a 0
   pwmSingleBitPortSetDutyCycle(c_pwm, valores_pwm_off, N_PUERTOS_PWM);
+  c=0;
   for(i=0;i<N_PUERTOS_PWM;i++){
-      od_write_int(Salidas_pwm + (i<<2) , 0);
+      od_write_data(Salidas_pwm_ix, 1+i, (c, char[]),1);
   }
 
   // inicializamos Status del dispositivo CANopen
   // remote, deshabilitar encendido, voltaje habilitado (listo para encender permanece inactivo)
   Status = 0b1001010000;
-  od_write_short(Statusword, Status);
+  od_write_data(Statusword_ix, 0, (Status, char[]), 2);
 
   // iniciamos maestro SPI
   spi_master_init(spi_if, DEFAULT_SPI_CLOCK_DIV);
@@ -466,69 +467,88 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
   c=leer_reg_nrf(spi_if, 5);
   c=leer_reg_nrf(spi_if, 6);
 
-
-
   // TODO: RTnet: esto es sólo para pruebas...
   // inicializamos timer para dentro de .5 segundos
   t :> time;
   time += 50000000;
 
+  /*
+  // Depuración de escrituras al OD
+  // comparamos resultados utilizando API normal XMOS con el método de pre-cargar las direcciones
+  // de los objetos
+  // Método de escritura con dirección precargada en variable int
+  posicion = 1023;
+  od_write_int(Position_actual_value, 0xAAFF);
+  // Método con API de XMOS
+  posicion = 0;
+  i = od_find_index(0x6063);
+  od_read_data(i, 0, (posicion, unsigned char[]), 4);
+  // prueba lectura con dirección precargada
+  i = od_read_int (Position_actual_value);
+  */
+
   while(1){
       // Actualizamos registro de estado para revisarlo...
-      Status = od_read_short(Statusword);
+      od_read_data(Statusword_ix, 0, (Status, char[]), 2);
       // LED0 indica encendido, LED1 Listo, LED2 OperHab, LED3 sigue siendo un hartbeat
       if(Status & MSK_STATUS_OPERHAB){
-          od_write_byte(Salidas_digitales + 2, 0);
+          c=0;
       }
       else{
-          od_write_byte(Salidas_digitales + 2, 1);
+          c=1;
       }
+      od_write_data(Salidas_digitales_ix, 3, (c, char[]), 1);
+
       if(Status & MSK_STATUS_LISTO){
-          od_write_byte(Salidas_digitales + 1, 0);
+          c=0;
       }
       else{
-          od_write_byte(Salidas_digitales + 1, 1);
+          c=1;
       }
+      od_write_data(Salidas_digitales_ix, 2, (c, char[]), 1);
+
       if(Status & MSK_STATUS_ENCENDIDO){
-          od_write_byte(Salidas_digitales + 0, 0);
+          c=0;
       }
       else{
-          od_write_byte(Salidas_digitales + 0, 1);
+          c=1;
       }
+      od_write_data(Salidas_digitales_ix, 1, (c, char[]), 1);
 
 
       // *********************
       // Revisamos modo de funcionamiento
       // *********************
-      if(od_read_byte(Modes_of_operation) != MODO_COPEN_VEL){
+      od_read_data(Modes_of_operation_ix, 0, (c, char[]), 1);
+      if(c != MODO_COPEN_VEL){
           // modo no es velocidad, activamos parada rápida
           Status |= MSK_STATUS_PARAR;
-          od_write_short(Statusword,Status);
+          od_write_data(Statusword_ix, 0, (Status, char[]), 2);
           // TODO RTnet: cuando el eje se detenga tendríamos que hacer algo más?
       }
       // *********************
       // Revisamos controlword
       // *********************
-      Control = od_read_short(Controlword);
+      od_read_data(Controlword_ix, 0, (Control, char[]), 2);
       // si solicitan parar rápido
       if(Control & MSK_CONTROL_PARAR){
           // activamos parada rápida
           Status |= MSK_STATUS_PARAR;
-          od_write_short(Statusword,Status);
+          od_write_data(Statusword_ix, 0, (Status, char[]), 2);
       }
       // Si solicitan deshabilitar voltaje
       if(Control & MSK_CONTROL_DESHABV){
           // deshabilitamos voltaje y operación
           Status &= 0xffff - MSK_STATUS_VOLTHAB;
           Status &= 0xffff - MSK_STATUS_OPERHAB;
-          od_write_short(Statusword,Status);
+          od_write_data(Statusword_ix, 0, (Status, char[]), 2);
       }
       // Si solicitan habilitar operacion
       if(Control & MSK_CONTROL_HABOPER){
           // verificamos estar encendidos
           if(Status & MSK_STATUS_ENCENDIDO){
               Status |= MSK_STATUS_OPERHAB;
-              od_write_short(Statusword,Status);
+              od_write_data(Statusword_ix, 0, (Status, char[]), 2);
           }
       }
       // reset por fallo
@@ -539,14 +559,14 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           Status &= 0xffff - MSK_STATUS_OPERHAB;
           Status &= 0xffff - MSK_STATUS_ENCENDIDO;
           Status &= 0xffff - MSK_STATUS_LISTO;
-          od_write_short(Statusword,Status);
+          od_write_data(Statusword_ix, 0, (Status, char[]), 2);
       }
       // si solicitan encender
       if(Control & MSK_CONTROL_ENCENDER){
           // verificamos estar listos
           if(Status & MSK_STATUS_LISTO){
               Status |= MSK_STATUS_ENCENDIDO;
-              od_write_short(Statusword,Status);
+              od_write_data(Statusword_ix, 0, (Status, char[]), 2);
           }
       }
       // *****************************************
@@ -558,7 +578,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           // TODO RTnet: deberíamos verificar bus rtnet activo, módulo CANopen estándar XMOS no permite ésto
           // podríamos esperar a recibir alguna trama NMT, o LSS o SDO para pasar al estado listo...
           Status |= MSK_STATUS_LISTO;
-          od_write_short(Statusword,Status);
+          od_write_data(Statusword_ix, 0, (Status, char[]), 2);
       }
 
       // ***********************************************
@@ -570,7 +590,8 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       c=0;
       for(i=7;i>=0;i--){
           c <<= 1;                                              // decalamos 1 bit a la izq
-          c += (od_read_byte(Salidas_digitales+i) & 0x01);      // ponemos valor al bit 0
+          od_read_data(Salidas_digitales_ix, 1+i, (cc, char[]), 1);
+          c += cc & 0b1;                                       // ponemos valor al bit 0
       }
       // sólo actualizamos salidas si cambió algún bit
       if(c != p_out4_ant){
@@ -593,11 +614,12 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
               Status &= 0xffff - MSK_STATUS_OPERHAB;
               Status &= 0xffff - MSK_STATUS_ENCENDIDO;
               Status &= 0xffff - MSK_STATUS_LISTO;
-              od_write_short(Statusword,Status);
+              od_write_data(Statusword_ix, 0, (Status, char[]), 2);
           }
           // actualizamos objeto entradas_digitales según estado de pines de entrada
           for(i=0;i<N_ENT_DIGITALES;i++){
-              od_write_byte(Entradas_digitales + i, c & 0x01);  // un solo bit en cada indice
+              cc=c & 0b1;
+              od_write_data(Entradas_digitales_ix, 1+i, (cc, char[]) , 1);  // un solo bit en cada indice
               c >>= 1;                                          // decalamos para el próximo bit
           }
       }
@@ -611,7 +633,8 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           uc=1;             // en uc llevamos máscara del bit correspondiente de las salidas DIR
           for(c=0;c<N_PUERTOS_PWM;c++){
               // leemos los objetos de salidas pwm (cada objeto ocupa 4 bytes)
-              if((i=od_read_int(Salidas_pwm + (c<<2))) != voltajes[c]){
+              od_read_data(Salidas_pwm_ix, 1+c, (i, char[]), 2);
+              if(i != voltajes[c]){
                   // actualizamos salidas pwm
                   voltajes[c] = i;
                   if(i < 0){
@@ -644,13 +667,13 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
       // ********************************************************
       // Revisamos cuenta encoder 1 (encoder servo) por si cambió
       // ********************************************************
-      // TODO
       {velocidad, posicion, ok} = get_qei_data(c_encoder[1]);
       //if(ok){
           if (posicion != posicion_ant){
               // actualizamos objeto del diccionario
-              od_write_int(Position_actual_value, posicion);
-              od_write_int(Velocity_actual_value, velocidad);
+              od_write_data(Position_ix, 0, (posicion, char[]), 4);
+              od_read_data(Position_ix, 0, (posicion, char[]), 4);
+              od_write_data(Velocity_ix, 0, (velocidad, char[]), 4);
               // registramos posicion para la próxima comparación
               posicion_ant = posicion;
           }
@@ -694,7 +717,7 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
                   ui = spi_master_in_word(spi_if);
                   slave_deselect();
                   // actualizamos objeto del diccionario
-                  od_write_int(Position1_actual_value, ui);
+                  od_write_data(Position1_ix, 0, (ui, char[]), 2);
               }
               else{
                   // borramos flag para que avise con
@@ -749,23 +772,23 @@ void aplicacion ( streaming chanend c_application, chanend c_pwm, streaming chan
           // boton apretado hace bit bajo
           if(!(p_in_ant & MSK_BOTON_1)){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
-              i = od_read_int(Salidas_pwm);
+              od_read_data(Salidas_pwm_ix, 1, (i, char[]), 2);
               i += 10;
-              od_write_int(Salidas_pwm , i);
+              od_write_data(Salidas_pwm_ix, 1, (i, char[]), 2);
           }
 
           p_in_boton2 :> c;
           if(!c){
               // modificamos registros de salidas pwm, el bucle luego se encargará de actualizar generador PWM
-              i = od_read_int(Salidas_pwm);
+              od_read_data(Salidas_pwm_ix, 1, (i, char[]), 2);
               i -= 10;
-              od_write_int(Salidas_pwm, i);
+              od_write_data(Salidas_pwm_ix, 1, (i, char[]), 2);
           }
 
           // alternamos bit 3 (4to LED) de salidas digitales accediendo al 4to subíndice (Sal_dig apunta al 1er sub.)
-          c = od_read_byte(Salidas_digitales + 3);
+          od_read_data(Salidas_digitales_ix, 4, (c, char[]), 1);
           c ^= 0x01;
-          od_write_byte(Salidas_digitales + 3, c);
+          od_write_data(Salidas_digitales_ix, 4, (c, char[]), 1);
 
           // próxima vez dentro de .5 segundos
           time += 50000000;
@@ -830,11 +853,14 @@ int main()
     // 1 canal de salida y 1 canal de entrada hacia los servicios Ethernet
     // 1 canal de entrada/salida hacia servidor CANopen
     on tile [1]: rtnet_sync(tx[0], rx[0], c_rx_tx);
-//    on tile [1]: rtnet_sync(tx[0], rx[0]);
 
+    // Servidor CANopen y Aplicación DEBEN estar en el mismo Tile pues comparte acceso al Diccionario de Objetos
+    // Si se los asigna a Tiles separados existirán 2 Diccionarios de Objetos independientes
     // se inicia sevicio CANopen con 1 canal doble vía para comunicar con RTnet y otro doble vía para aplicación
-    on tile [1]: canopen_server ( c_rx_tx , c_application );
+    on tile [0]: canopen_server ( c_rx_tx , c_application );
 
+    // Servidor CANopen y Aplicación DEBEN estar en el mismo Tile pues comparte acceso al Diccionario de Objetos
+    // Si se los asigna a Tiles separados existirán 2 Diccionarios de Objetos independientes
     // se inicia la aplicación con comunicaciones a CANopen, sync_RTnet, módulo PWM y módulo contador de encoder
     on tile [0]: aplicacion ( c_application , c_pwm , c_qei);
 
